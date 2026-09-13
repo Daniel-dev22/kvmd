@@ -177,3 +177,11 @@ div.window[data-x-wm-window-maximized] div.window-header div.window-buttons butt
 :root[data-ui="mobile"] div.window {
 	transform: none !important;
 }
+
+/* The mouse pad is always-on-top by design, so docking it to the same edge as
+   an open sheet put it OVER that sheet's lower controls. It sits above the
+   sheet instead; wm.js keeps --wm-dock-offset equal to the open sheet's
+   height, and it is 0 when nothing else is docked. */
+:root[data-ui="mobile"] div.window#mouse-window:not(.window-full-tab) {
+	bottom: var(--wm-dock-offset, 0px) !important;
+}

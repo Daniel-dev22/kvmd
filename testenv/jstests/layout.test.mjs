@@ -148,15 +148,83 @@ const minKeyWidth = (viewport) => viewport / 12;
 
 describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
 	const LAYERS = ["abc", "sym", "fn", "num", "intl"];
-	const SHOW = `document.getElementById("keyboard-window").classList.remove("hidden");`;
+	// Open it the way a user does. Stripping the "hidden" class directly skips
+	// the window manager, so the layout the test measures is not the layout the
+	// app produces -- which is exactly how a mouse pad covering the typing bar
+	// got past a green suite.
+	const SHOW = `document.getElementById("mouse-window-keyboard-button").click();`;
 
 	async function openKeyboard(width = 390) {
 		const pg = await open("web/kvm/index.html", width);
 		assert.equal(await pg.eval("document.documentElement.dataset.ui"), "mobile",
 			"precondition: the compact board only exists in the compact layout");
 		await pg.eval(SHOW);
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
+		assert.equal(await pg.eval(`document.getElementById("keyboard-window").classList.contains("hidden")`), false,
+			"the keyboard button did not open the keyboard");
 		return pg;
 	}
+
+	// Being present and correctly sized is not the same as being touchable.
+	// Anything a finger is meant to hit must be the topmost element at its own
+	// centre -- nothing may be sitting on top of it.
+	const hitTest = (selector) => `(() => {
+		return [...document.querySelectorAll(${JSON.stringify(selector)})]
+			.filter((el) => el.getBoundingClientRect().height > 0)
+			.map((el) => {
+				const b = el.getBoundingClientRect();
+				const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+				return {
+					what: el.id || el.dataset.keypadCode || el.textContent.trim().slice(0, 10),
+					ok: !!hit && (hit === el || el.contains(hit)),
+					covered: (hit && hit !== el && !el.contains(hit)) ? (hit.id || hit.className) : null,
+				};
+			})
+			.filter((r) => !r.ok);
+	})()`;
+
+	test("the typing bar is actually touchable, not covered", async () => {
+		const pg = await openKeyboard();
+		const blocked = await pg.eval(hitTest("#hid-type-input"));
+		await pg.close();
+		assert.deepEqual(blocked, [],
+			`the typing bar is covered: ${JSON.stringify(blocked)}`);
+	});
+
+	test("the mouse buttons are touchable while the keyboard is open", async () => {
+		const pg = await openKeyboard();
+		const blocked = await pg.eval(hitTest("#mouse-buttons .key"));
+		await pg.close();
+		assert.deepEqual(blocked, [], `mouse buttons covered: ${JSON.stringify(blocked)}`);
+	});
+
+	test("every visible key and layer button is touchable", async () => {
+		const pg = await openKeyboard();
+		const blocked = await pg.eval(hitTest("#keyboard-compact .key, #keyboard-layers button, #hid-type-clear"));
+		await pg.close();
+		assert.deepEqual(blocked, [], `covered controls: ${JSON.stringify(blocked)}`);
+	});
+
+	test("no two docked windows sit on top of each other", async () => {
+		const pg = await openKeyboard();
+		const overlaps = await pg.eval(`(() => {
+			const wins = [...document.getElementsByClassName("window")]
+				.filter((el) => !el.classList.contains("hidden") && el.id !== "stream-window")
+				.map((el) => { const b = el.getBoundingClientRect(); return {id: el.id, top: b.top, bottom: b.bottom}; })
+				.filter((w) => w.bottom > w.top);
+			const bad = [];
+			for (let i = 0; i < wins.length; i++) {
+				for (let j = i + 1; j < wins.length; j++) {
+					const a = wins[i], b = wins[j];
+					if (a.top < b.bottom - 1 && b.top < a.bottom - 1) bad.push(a.id + " over " + b.id);
+				}
+			}
+			return bad;
+		})()`);
+		await pg.close();
+		assert.deepEqual(overlaps, [],
+			`docked windows overlap: ${overlaps.join(", ")} -- the one on top hides the other's controls`);
+	});
 
 	for (const width of [320, 390]) {
 		for (const layer of LAYERS) {

@@ -467,6 +467,7 @@ function __WindowManager() {
 
 	var __closeWindow = function(el_win) {
 		tools.hidden.setVisible(el_win, false);
+		__updateDockOffset();
 		el_win.focus();
 		el_win.blur();
 		if (el_win.close_hook) {
@@ -571,6 +572,26 @@ function __WindowManager() {
 		__organizeAllWindows();
 	};
 
+	// In the compact layout every window is docked to the bottom edge, so two
+	// visible ones would sit on top of each other. The mouse pad is always on
+	// top (it is the persistent control surface), which meant it covered the
+	// bottom of whatever sheet was open -- including the typing bar, so tapping
+	// the typing bar hit the mouse pad instead. The pad now rides above the
+	// open sheet rather than on it.
+	var __updateDockOffset = function() {
+		let offset = 0;
+		if (__isCompact()) {
+			for (let el_win of $$("window")) {
+				if (el_win.id !== "mouse-window"
+					&& !el_win.classList.contains("window-full-tab")
+					&& tools.hidden.isVisible(el_win)) {
+					offset = Math.max(offset, el_win.offsetHeight);
+				}
+			}
+		}
+		document.documentElement.style.setProperty("--wm-dock-offset", `${offset}px`);
+	};
+
 	var __organizeAllWindows = function() {
 		for (let el_win of $$("window")) {
 			if (tools.hidden.isVisible(el_win)) {
@@ -605,6 +626,7 @@ function __WindowManager() {
 		} else {
 			__organizeFitWindow(el_win);
 		}
+		__updateDockOffset();
 	};
 
 	var __organizeCenterWindow = function(el_win) {
