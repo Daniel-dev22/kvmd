@@ -211,6 +211,106 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.equal(h, 0, "the desktop board is still taking space on a phone");
 	});
 
+	test("the native typing bar is present, and is the last thing above the keyboard", async () => {
+		const pg = await openKeyboard();
+		const m = await pg.eval(`(() => {
+			const el = document.getElementById("hid-type-input");
+			if (!el) return null;
+			const r = el.getBoundingClientRect();
+			const cs = getComputedStyle(el);
+			const rows = [...document.querySelectorAll("#keyboard-compact .keypad-row")]
+				.filter((x) => x.getBoundingClientRect().height > 0);
+			const lowest = Math.max(...rows.map((x) => x.getBoundingClientRect().bottom));
+			return {h: Math.round(r.height), font: parseFloat(cs.fontSize), top: r.top, lowestRow: lowest};
+		})()`);
+		await pg.close();
+		assert.ok(m, "the typing bar is missing from the compact layout");
+		assert.ok(m.h >= MIN_TARGET, `the typing bar is only ${m.h}px tall`);
+		// Under 16px, iOS zooms the whole page when the field is focused.
+		assert.ok(m.font >= 16, `the typing field renders at ${m.font}px`);
+		assert.ok(m.top >= m.lowestRow - 1,
+			"the typing bar must sit below the keys, where the system keyboard opens");
+	});
+
+	test("the typing bar is not rendered on desktop", async () => {
+		const pg = await open("web/kvm/index.html", 1440, 900, false);
+		await pg.eval(SHOW);
+		const h = await pg.eval(`Math.round(document.getElementById("hid-type-input").getBoundingClientRect().height)`);
+		await pg.close();
+		assert.equal(h, 0, "desktop already has the Text menu; it must not grow a second typing field");
+	});
+
+	test("the persistent strip stays on screen whichever layer is showing", async () => {
+		const pg = await openKeyboard();
+		const seen = await pg.eval(`(() => {
+			const out = {};
+			for (const L of ["abc", "sym", "fn", "num", "intl"]) {
+				document.querySelector('[data-keypad-layer-button="' + L + '"]').click();
+				out[L] = [...document.querySelectorAll("#keyboard-compact [data-keypad-persistent] .key")]
+					.filter((el) => el.getBoundingClientRect().height > 0).length;
+			}
+			return out;
+		})()`);
+		await pg.close();
+		for (const [layer, count] of Object.entries(seen)) {
+			assert.ok(count >= 10, `only ${count} strip keys visible on the ${layer} layer`);
+		}
+	});
+
+	test("typing in the bar reaches api/hid/print, once per burst", async () => {
+		// The whole chain, in a real engine: input event -> diff -> queue ->
+		// printText -> tools.httpPost -> XHR. Recorded by standing in for XHR,
+		// because there is no kvmd behind this page.
+		const pg = await openKeyboard();
+		const sent = await pg.eval(`(() => {
+			window.__sent = [];
+			const Real = window.XMLHttpRequest;
+			window.XMLHttpRequest = function() {
+				const x = new Real();
+				const open = x.open.bind(x);
+				const send = x.send.bind(x);
+				let url = null;
+				x.open = (m, u, a) => { url = u; return open(m, u, a); };
+				x.send = (body) => { window.__sent.push({url: url, body: body}); return send(body); };
+				return x;
+			};
+			const el = document.getElementById("hid-type-input");
+			el.focus();
+            // How a soft keyboard, a swipe, or dictation delivers text.
+			el.value = "hello";
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			return window.__sent;
+		})()`);
+		await pg.close();
+		assert.equal(sent.length, 1, `expected one request, got ${sent.length}`);
+		assert.match(sent[0].url, /api\/hid\/print/, `posted to ${sent[0].url}`);
+		assert.match(sent[0].url, /keymap=/, "the request must name the server-side keymap");
+		assert.equal(sent[0].body, "hello", `body was ${JSON.stringify(sent[0].body)}`);
+	});
+
+	test("erasing does not retype the line", async () => {
+		const pg = await openKeyboard();
+		const sent = await pg.eval(`(() => {
+			window.__sent = [];
+			const Real = window.XMLHttpRequest;
+			window.XMLHttpRequest = function() {
+				const x = new Real();
+				const send = x.send.bind(x);
+				x.send = (body) => { window.__sent.push(body); return send(body); };
+				return x;
+			};
+			const el = document.getElementById("hid-type-input");
+			el.value = "hello";
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			el.value = "hell";
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			return window.__sent;
+		})()`);
+		await pg.close();
+		// A deletion is a Backspace key event, never a re-print of the text.
+		assert.deepEqual(sent, ["hello"], `erasing sent: ${JSON.stringify(sent)}`);
+	});
+
 	test("the keyboard can be dismissed on a phone", async () => {
 		// kvm/x-mobile.css used to hide the window header outright, so the
 		// keyboard could be neither moved nor closed once it was up.

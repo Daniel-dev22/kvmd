@@ -77,10 +77,22 @@ test("labels are written down exactly once, in the key table", () => {
 	}
 });
 
-test("every compact row declares which layer it belongs to", () => {
-	const rows = [...COMPACT.matchAll(/<div class="keypad-row"([^>]*)>/g)].map((m) => m[1]);
-	const orphans = rows.filter((attrs) => !attrs.includes("data-keypad-layer="));
-	assert.equal(orphans.length, 0, `${orphans.length} compact rows have no layer and would never be shown`);
+test("every compact row is either in a layer or explicitly persistent", () => {
+	// A row with neither would be hidden by the layer rule and never shown.
+	const rows = [...COMPACT.matchAll(/<div class="keypad-row[^"]*"([^>]*)>/g)].map((m) => m[1]);
+	const orphans = rows.filter((a) => !a.includes("data-keypad-layer=") && !a.includes("data-keypad-persistent"));
+	assert.equal(orphans.length, 0, `${orphans.length} compact rows would never be shown`);
+	assert.ok(rows.some((a) => a.includes("data-keypad-persistent")),
+		"the keys an IME cannot produce must stay on screen across layers");
+});
+
+test("the persistent strip carries what a phone keyboard cannot send", () => {
+	const strip = COMPACT.slice(COMPACT.indexOf("keypad-strip"));
+	for (const code of ["Escape", "ControlLeft", "AltLeft", "MetaLeft", "ShiftLeft", "Tab",
+		"ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+		assert.ok(strip.includes(`data-keypad-code="${code}"`),
+			`${code} is not reachable while the native keyboard is up`);
+	}
 });
 
 test("every layer offered by the picker actually has rows", () => {

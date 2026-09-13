@@ -22,6 +22,8 @@
 
 import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
+import {printText} from "./print.js";
+import {diffTyped, makePrintQueue} from "./typing.js";
 
 
 export function Keyboard(__recordWsEvent) {
@@ -44,6 +46,7 @@ export function Keyboard(__recordWsEvent) {
 		__keypad = new Keypad($("keyboard-window"), __sendKey);
 
 		__initLayers();
+		__initTyping();
 
 		$("hid-keyboard-led").title = "Keyboard free";
 
@@ -375,6 +378,86 @@ export function Keyboard(__recordWsEvent) {
 				__innerSendKey(code, state, true);
 			}
 		}
+	};
+
+	// ======================= native typing =======================
+	//
+	// The phone's own keyboard drives the host. Characters go through the
+	// server's keymap (api/hid/print) rather than being mapped to scancodes
+	// here, so swipe, dictation, long-press accents and autocorrect all work,
+	// and there is no second copy of every keymap in the browser.
+	//
+	// Editing intents that are not characters -- Backspace, Enter -- are sent
+	// as ordinary key events on the existing socket.
+
+	var __typed = "";
+	var __composing = false;
+	var __printer = null;
+
+	var __initTyping = function() {
+		let el = $("hid-type-input");
+		if (el === null) {
+			return; // Desktop pages do not render the typing bar
+		}
+
+		__printer = makePrintQueue({
+			"post": (text, keymap, done) => printText(text, keymap, 0, (http) => done(http.status === 200, http)),
+			"getKeymap": function() {
+				// The Text menu already owns the keymap chooser; reuse it
+				// rather than offering a second one that could disagree.
+				let el_km = $("hid-pak-keymap-selector");
+				return ((el_km !== null && el_km.value) ? el_km.value : "en-us");
+			},
+			"onError": (http) => tools.error("Keyboard: typing failed:", http.status, http.responseText),
+		});
+
+		// An IME composes in place and fires input events for partial text.
+		// Sending those would type every intermediate guess to the host.
+		el.addEventListener("compositionstart", function() {
+			__composing = true;
+		});
+		el.addEventListener("compositionend", function() {
+			__composing = false;
+			__syncTyped(el);
+		});
+		el.addEventListener("input", function() {
+			if (!__composing) {
+				__syncTyped(el);
+			}
+		});
+		el.addEventListener("keydown", function(ev) {
+			if (ev.key === "Enter") {
+				ev.preventDefault();
+				__sendKey("Enter", true);
+				__sendKey("Enter", false);
+				el.value = "";
+				__typed = "";
+			}
+		});
+
+		tools.el.setOnClick($("hid-type-clear"), function() {
+			// Local only -- clears the field, never touches the host.
+			el.value = "";
+			__typed = "";
+			el.focus();
+		});
+	};
+
+	var __syncTyped = function(el) {
+		let now = el.value;
+		let was = __typed;
+		__typed = now;
+
+		if ($("hid-mute-switch").checked) {
+			return;
+		}
+
+		let change = diffTyped(was, now);
+		for (let left = change.backspaces; left > 0; left -= 1) {
+			__sendKey("Backspace", true);
+			__sendKey("Backspace", false);
+		}
+		__printer.push(change.added);
 	};
 
 	// The compact board shows one layer at a time. Desktop ignores this

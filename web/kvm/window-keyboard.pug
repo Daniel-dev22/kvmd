@@ -332,10 +332,12 @@ mixin ck_row(layer)
 			.keypad-row
 				+dk("Convert", 0, "small")
 
-	//- ============ compact: the same keys, one layer at a time ============
-	//- Every row is a 20-column grid, so no row can exceed the viewport. The
-	//- five layers together cover all 111 codes -- a phone reaches everything
-	//- a desktop does, which was not true before.
+	//- ========= compact: the phone's own keyboard first =========
+	//- Typing goes through the host's keymap on the server (api/hid/print), so
+	//- swipe, dictation, long-press accents and autocorrect all work at real
+	//- speed. What an IME cannot produce -- Esc, the modifiers, Tab, arrows --
+	//- sits in a strip that is always on screen, and the full scancode board is
+	//- one tap away for a BIOS or a boot menu.
 	.keypad#keyboard-compact(data-layer="abc")
 		+ck_row("abc")
 			each letter in ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
@@ -346,17 +348,14 @@ mixin ck_row(layer)
 				+ck(`Key${letter}`, 2)
 			+ck_blank(1)
 		+ck_row("abc")
-			+ck("ShiftLeft", 3)
 			each letter in ["Z", "X", "C", "V", "B", "N", "M"]
 				+ck(`Key${letter}`, 2)
-			+ck("Backspace", 3)
+			+ck("Backspace", 6)
 		+ck_row("abc")
-			+ck("ControlLeft", 3)
-			+ck("AltLeft", 3)
-			+ck("Space", 5)
-			+ck("Comma", 2)
-			+ck("Period", 2)
-			+ck("Enter", 5)
+			+ck("Space", 10)
+			+ck("Comma", 3)
+			+ck("Period", 3)
+			+ck("Enter", 4)
 
 		+ck_row("sym")
 			each code in ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0"]
@@ -367,32 +366,26 @@ mixin ck_row(layer)
 				+ck(code, 2)
 			+ck_blank(1)
 		+ck_row("sym")
-			+ck("Tab", 4)
 			+ck("CapsLock", 4)
 			+ck("ContextMenu", 4)
 			+ck("ShiftRight", 4)
-			+ck("MetaLeft", 4)
+			+ck("MetaRight", 4)
+			+ck("AltRight", 4)
 
 		+ck_row("fn")
-			+ck("Escape", 2)
-			each code in ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"]
+			each code in ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"]
 				+ck(code, 2)
 		+ck_row("fn")
-			each code in ["F10", "F11", "F12"]
-				+ck(code, 2)
+			+ck("F11", 2)
+			+ck("F12", 2)
 			+ck("PrintScreen", 4)
 			+ck("ScrollLock", 4)
 			+ck("Pause", 4)
-			+ck("Power", 2)
+			+ck("Power", 4)
 		+ck_row("fn")
 			each code in ["Insert", "Home", "PageUp", "Delete", "End", "PageDown"]
 				+ck(code, 3)
 			+ck_blank(2)
-		+ck_row("fn")
-			each code in ["ArrowLeft", "ArrowUp", "ArrowDown", "ArrowRight"]
-				+ck(code, 3)
-			+ck("MetaRight", 4)
-			+ck("AltRight", 4)
 
 		+ck_row("num")
 			+ck("NumLock", 5)
@@ -426,3 +419,34 @@ mixin ck_row(layer)
 			+ck("Convert", 4)
 			+ck("ControlRight", 4)
 			+ck_blank(12)
+
+		//- Always on screen, whichever layer is showing and whether or not the
+		//- native keyboard is up. A phone IME cannot send any of these.
+		div(class="keypad-row keypad-strip" data-keypad-persistent)
+			+ck("Escape", 3)
+			+ck("Tab", 3)
+			+ck("ControlLeft", 3)
+			+ck("AltLeft", 3)
+			+ck("MetaLeft", 4)
+			+ck("ShiftLeft", 4)
+		div(class="keypad-row keypad-strip" data-keypad-persistent)
+			+ck("ArrowLeft", 5)
+			+ck("ArrowDown", 5)
+			+ck("ArrowUp", 5)
+			+ck("ArrowRight", 5)
+
+		//- Sits at the bottom so it is directly above the system keyboard when
+		//- that opens. 16px or larger, or iOS zooms the page on focus.
+		.keypad-type
+			input#hid-type-input(
+				type="text"
+				inputmode="text"
+				enterkeyhint="enter"
+				autocomplete="off"
+				autocorrect="off"
+				autocapitalize="off"
+				spellcheck="false"
+				placeholder="Tap to type on the host"
+				aria-label="Type on the host"
+			)
+			button#hid-type-clear(type="button" title="Clear") &times;

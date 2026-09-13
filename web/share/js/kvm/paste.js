@@ -25,6 +25,7 @@
 
 import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
+import {printText} from "./print.js";
 
 
 export function Paste(__recorder) {
@@ -84,7 +85,7 @@ export function Paste(__recorder) {
 
 				tools.debug(`HID: paste-as-keys ${keymap}: ${text}`);
 
-				tools.httpPost("api/hid/print", {"limit": 0, "keymap": keymap, "delay": delay / 1000}, function(http) {
+				printText(text, keymap, delay / 1000, function(http) {
 					tools.el.setEnabled($("hid-pak-text"), true);
 					tools.el.setEnabled($("hid-pak-button"), true);
 					tools.el.setEnabled($("hid-pak-keymap-selector"), true);
@@ -96,7 +97,7 @@ export function Paste(__recorder) {
 					} else if (http.status === 200) {
 						__recorder.recordPrintEvent(text, keymap, delay);
 					}
-				}, text, "text/plain", 7 * 24 * 3600);
+				});
 			};
 
 			if ($("hid-pak-ask-switch").checked) {

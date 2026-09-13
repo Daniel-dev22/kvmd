@@ -242,3 +242,54 @@ div.keypad-layers {
 	-webkit-transform: none;
 	transform: none;
 }
+
+/* The keys a phone's own keyboard cannot produce. Always on screen in the
+   compact layout, whichever layer is showing. */
+:root[data-ui="mobile"] div.keypad div.keypad-strip {
+	padding-top: 6px;
+	border-top: var(--border-menu-item-content-top-thin);
+}
+
+/* The native typing bar. Sits last so it is directly above the system keyboard
+   when that opens. */
+div.keypad-type {
+	display: none;
+}
+
+:root[data-ui="mobile"] div.keypad-type {
+	display: flex;
+	gap: 6px;
+	align-items: stretch;
+	padding-top: 6px;
+	border-top: var(--border-menu-item-content-top-thin);
+}
+
+:root[data-ui="mobile"] div.keypad-type input {
+	flex: 1;
+	min-width: 0;
+	min-height: 46px;
+	padding: 0 10px;
+	border: var(--border-control-thin);
+	border-radius: 6px;
+	color: var(--cs-code-default-fg);
+	background-color: var(--cs-code-default-bg);
+	/* Anything under 16px makes iOS zoom the whole page when this is focused. */
+	font-size: 16px;
+	font-family: inherit;
+}
+
+:root[data-ui="mobile"] div.keypad-type input:focus {
+	outline: none;
+	border: var(--border-intensive-thin);
+}
+
+:root[data-ui="mobile"] div.keypad-type button {
+	flex: 0 0 auto;
+	min-width: 46px;
+	min-height: 46px;
+	border: var(--border-key-thin);
+	border-radius: 6px;
+	color: var(--cs-key-default-fg);
+	background-color: var(--cs-key-default-bg);
+	font-size: 20px;
+}
