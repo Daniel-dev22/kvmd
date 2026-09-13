@@ -169,10 +169,76 @@ div.keypad div.locked b {
 }
 
 
-/* The keypad is still sized in fixed pixels and scaled as a block; Phase 2
-   replaces both with a viewport-derived key unit. Until then this preserves
-   the previous behaviour under the new layout switch rather than the old
-   user-agent sniff. */
+
+/* =========================================================================
+   Compact layout: every row is a 20-column grid, so a row is a fraction of
+   the viewport and cannot exceed it. This replaces a `zoom: 1.28` applied to
+   a board whose widest row needed 741px on a 390px screen -- which did not
+   overflow-and-scroll, it overflowed and was CLIPPED by div.window.
+   ========================================================================= */
+
+div.keypad-layers {
+	display: none;
+}
+
 :root[data-ui="mobile"] div.keypad {
-	zoom: 1.28;
+	zoom: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+:root[data-ui="mobile"] div.keypad-layers {
+	display: grid;
+	grid-template-columns: repeat(5, 1fr);
+	gap: 4px;
+	margin-bottom: 6px;
+}
+
+:root[data-ui="mobile"] div.keypad-layers button {
+	min-height: 36px;
+	padding: 0 2px;
+	font-size: 12px;
+	border: var(--border-key-thin);
+	border-radius: 6px;
+	color: var(--cs-key-default-fg);
+	background-color: var(--cs-key-default-bg);
+}
+
+:root[data-ui="mobile"] div.keypad-layers button[aria-pressed="true"] {
+	color: var(--cs-key-holded-fg);
+	background-color: var(--cs-key-holded-bg);
+	border-color: var(--cs-corner-bg);
+}
+
+:root[data-ui="mobile"] div.keypad div.keypad-row {
+	display: grid;
+	grid-template-columns: repeat(20, 1fr);
+	gap: 4px;
+	height: auto;
+	margin-bottom: 0;
+	white-space: normal;
+}
+
+:root[data-ui="mobile"] div.keypad div.key,
+:root[data-ui="mobile"] div.keypad div.empty {
+	grid-column: span var(--kc, 2);
+	width: auto;
+	height: auto;
+	/* Tall enough for a finger; a keyboard key is allowed to be narrower than
+	   it is tall, which is how every native on-screen keyboard is built. */
+	min-height: 46px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 14px;
+	overflow: hidden;
+}
+
+/* The desktop label is centred with a 50% translate; flex centring here would
+   double the offset. */
+:root[data-ui="mobile"] div.keypad div.label {
+	top: auto;
+	-webkit-transform: none;
+	transform: none;
 }

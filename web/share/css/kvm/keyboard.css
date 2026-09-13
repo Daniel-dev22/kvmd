@@ -23,14 +23,28 @@
 div#keyboard-desktop {
 	display: block;
 }
-div#keyboard-mobile {
-	display: none;
-}
-
 :root[data-ui="mobile"] div#keyboard-desktop {
 	display: none;
 }
 
-:root[data-ui="mobile"] div#keyboard-mobile {
-	display: block;
+div#keyboard-compact {
+	display: none;
+}
+
+:root[data-ui="mobile"] div#keyboard-compact {
+	display: flex;
+}
+
+/* One layer at a time. Every layer is present in the DOM either way, so
+   keypad.js keeps modifier state in step across both arrangements. */
+div#keyboard-compact div[data-keypad-layer] {
+	display: none;
+}
+
+div#keyboard-compact[data-layer="abc"] div[data-keypad-layer="abc"],
+div#keyboard-compact[data-layer="sym"] div[data-keypad-layer="sym"],
+div#keyboard-compact[data-layer="fn"] div[data-keypad-layer="fn"],
+div#keyboard-compact[data-layer="num"] div[data-keypad-layer="num"],
+div#keyboard-compact[data-layer="intl"] div[data-keypad-layer="intl"] {
+	display: grid;
 }

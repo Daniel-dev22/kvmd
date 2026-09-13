@@ -49,10 +49,11 @@ export function declarationsOnly(css) {
 		.replace(/@(?:media|supports|-moz-document)[^{]*\{/g, "{");
 }
 
-// All custom properties DECLARED anywhere in the stylesheets.
+// All custom properties DECLARED anywhere -- in a stylesheet, or inline on an
+// element (a per-key grid span, for instance, is set on the element itself).
 export function declaredVars() {
 	const found = new Set();
-	for (const f of cssFiles()) {
+	for (const f of [...cssFiles(), ...PAGES]) {
 		for (const m of read(f).matchAll(/(--[A-Za-z0-9_-]+)\s*:/g)) {
 			found.add(m[1]);
 		}
@@ -60,12 +61,14 @@ export function declaredVars() {
 	return found;
 }
 
-// All custom properties REFERENCED via var() anywhere in the stylesheets.
+// Custom properties referenced via var() WITHOUT a fallback. Those are the only
+// ones that can fail to resolve -- and when one does, the whole declaration is
+// dropped silently, which is how --border-navbar-menu-top-thin sat broken.
 export function usedVars() {
 	const found = new Map();
 	for (const f of cssFiles()) {
-		for (const m of read(f).matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)) {
-			if (!found.has(m[1])) {
+		for (const m of read(f).matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*(,?)/g)) {
+			if (m[2] !== "," && !found.has(m[1])) {
 				found.set(m[1], f);
 			}
 		}

@@ -1,34 +1,204 @@
-mixin spacer(sp)
+//- ===========================================================================
+//- The on-screen keyboard.
+//-
+//- Every key is defined EXACTLY ONCE, in KB_KEYS below. The two arrangements
+//- that follow -- the full desktop board and the layered compact board -- only
+//- reference codes; neither of them restates a label.
+//-
+//- This file used to contain two hand-written boards. They had already drifted:
+//- the mobile copy labelled Quote as a backtick, and the compact board was a
+//- strict subset, so a phone could not send the numpad, Power, or any of the
+//- Japanese keys at all -- 24 codes with no way to reach them.
+//-
+//- keypad.js binds by data-keypad-code and mirrors state across every element
+//- carrying the same code, so a key present in both arrangements stays in sync.
+//- ===========================================================================
+
+-
+	var KB_KEYS = {
+		"Escape": {"t": "Esc"},
+		"F1": {"t": "F1"},
+		"F2": {"t": "F2"},
+		"F3": {"t": "F3"},
+		"F4": {"t": "F4"},
+		"F5": {"t": "F5"},
+		"F6": {"t": "F6"},
+		"F7": {"t": "F7"},
+		"F8": {"t": "F8"},
+		"F9": {"t": "F9"},
+		"F10": {"t": "F10"},
+		"F11": {"t": "F11"},
+		"F12": {"t": "F12"},
+		"Backquote": {"t": "~<br>`"},
+		"Digit1": {"t": "!<br>1"},
+		"Digit2": {"t": "@<br>2"},
+		"Digit3": {"t": "#<br>3"},
+		"Digit4": {"t": "$<br>4"},
+		"Digit5": {"t": "%<br>5"},
+		"Digit6": {"t": "^<br>6"},
+		"Digit7": {"t": "&amp;<br>7"},
+		"Digit8": {"t": "*<br>8"},
+		"Digit9": {"t": "(<br>9"},
+		"Digit0": {"t": ")<br>0"},
+		"Minus": {"t": "_<br>-"},
+		"Equal": {"t": "+<br>="},
+		"Backspace": {"t": "&#8612;"},
+		"Tab": {"t": "&#8676;<br>&#8677;"},
+		"KeyQ": {"t": "Q"},
+		"KeyW": {"t": "W"},
+		"KeyE": {"t": "E"},
+		"KeyR": {"t": "R"},
+		"KeyT": {"t": "T"},
+		"KeyY": {"t": "Y"},
+		"KeyU": {"t": "U"},
+		"KeyI": {"t": "I"},
+		"KeyO": {"t": "O"},
+		"KeyP": {"t": "P"},
+		"BracketLeft": {"t": "{<br>["},
+		"BracketRight": {"t": "}<br>]"},
+		"Backslash": {"t": "|<br>&bsol;"},
+		"CapsLock": {"t": "<br> Caps Lock", "lamp": "hid-keyboard-caps-led"},
+		"KeyA": {"t": "A"},
+		"KeyS": {"t": "S"},
+		"KeyD": {"t": "D"},
+		"KeyF": {"t": "F"},
+		"KeyG": {"t": "G"},
+		"KeyH": {"t": "H"},
+		"KeyJ": {"t": "J"},
+		"KeyK": {"t": "K"},
+		"KeyL": {"t": "L"},
+		"Semicolon": {"t": ":<br>;"},
+		"Quote": {"t": "\"<br>'"},
+		"Enter": {"t": "Enter<br>&crarr;"},
+		"ShiftLeft": {"t": "Shift", "mod": true},
+		"KeyZ": {"t": "Z"},
+		"KeyX": {"t": "X"},
+		"KeyC": {"t": "C"},
+		"KeyV": {"t": "V"},
+		"KeyB": {"t": "B"},
+		"KeyN": {"t": "N"},
+		"KeyM": {"t": "M"},
+		"Comma": {"t": "&lt;<br>,"},
+		"Period": {"t": "&gt;<br>."},
+		"Slash": {"t": "?<br>/"},
+		"ShiftRight": {"t": "Shift", "mod": true},
+		"ControlLeft": {"t": "Ctrl", "mod": true},
+		"MetaLeft": {"t": "Win", "mod": true},
+		"AltLeft": {"t": "Alt", "mod": true},
+		"Space": {"t": ""},
+		"AltRight": {"t": "Alt", "mod": true},
+		"MetaRight": {"t": "Win", "mod": true},
+		"ContextMenu": {"t": "<br>Menu"},
+		"ControlRight": {"t": "Ctrl", "mod": true},
+		"PrintScreen": {"t": "Pt/Sq", "mod": true},
+		"ScrollLock": {"t": "<br> ScrLk", "lamp": "hid-keyboard-scroll-led"},
+		"Pause": {"t": "P/Brk"},
+		"Insert": {"t": "Ins"},
+		"Home": {"t": "Home"},
+		"PageUp": {"t": "PgUp"},
+		"Delete": {"t": "Del"},
+		"End": {"t": "End"},
+		"PageDown": {"t": "PgDn"},
+		"ArrowUp": {"t": "&uarr;"},
+		"ArrowLeft": {"t": "&larr;"},
+		"ArrowDown": {"t": "&darr;"},
+		"ArrowRight": {"t": "&rarr;"},
+		"Power": {"t": "PWR"},
+		"NumLock": {"t": "<br> NmLk", "lamp": "hid-keyboard-num-led"},
+		"NumpadDivide": {"t": "/"},
+		"NumpadMultiply": {"t": "*"},
+		"NumpadSubtract": {"t": "-"},
+		"Numpad7": {"t": "7<br>Home"},
+		"Numpad8": {"t": "8<br>&uarr;"},
+		"Numpad9": {"t": "9<br>PgUp"},
+		"Numpad4": {"t": "4<br>&larr;"},
+		"Numpad5": {"t": "5<br><br>"},
+		"Numpad6": {"t": "6<br>&rarr;"},
+		"NumpadAdd": {"t": "+"},
+		"Numpad1": {"t": "1<br>End"},
+		"Numpad2": {"t": "2<br>&darr;"},
+		"Numpad3": {"t": "3<br>PgDn"},
+		"Numpad0": {"t": "0<br>Ins"},
+		"NumpadDecimal": {"t": ".<br>Del"},
+		"NumpadEnter": {"t": "Ent"},
+		"IntlBackslash": {"t": "&bsol;<br>|"},
+		"IntlYen": {"t": "¥<br>_"},
+		"IntlRo": {"t": "&bsol;<br>ろ"},
+		"KanaMode": {"t": "Kana", "mod": true},
+		"NonConvert": {"t": "N/Cnv", "mod": true},
+		"Convert": {"t": "Cnv", "mod": true},
+	};
+
+	// Which compact layer each group of keys belongs to. Desktop shows
+	// everything at once; compact shows one layer at a time.
+	var KB_LAYERS = [
+		{"id": "abc", "title": "ABC"},
+		{"id": "sym", "title": "?123"},
+		{"id": "fn", "title": "Fn"},
+		{"id": "num", "title": "Num"},
+		{"id": "intl", "title": "Intl"},
+	];
+
+
+//- The label is rendered in one place, so the two arrangements cannot disagree
+//- about what a key says.
+mixin kb_label(code)
+	- var k = KB_KEYS[code]
+	.label
+		if k.lamp
+			img(class=`inline-lamp-small ${k.lamp} led-gray` src=`${svg_dir}/led-square.svg`)
+		if k.mod
+			b &bull;
+			br
+		!= k.t
+
+
+mixin kb_spacer(sp)
 	if sp == 1
 		.spacer
 	else if sp == 2
 		.spacer-fixed
 
 
-mixin key(sp, code, classes="", width=0)
-	div(data-keypad-code=code, class=`key ${classes}`, style=(width ? `width: ${width}px` : ""))
-		.label
-			block
-	+spacer(sp)
+//- Desktop: unchanged geometry -- the same width classes and spacers as before.
+mixin dk(code, sp, classes, width)
+	- var k = KB_KEYS[code]
+	div(
+		data-keypad-code=code
+		data-keypad-allow-autohold=(k.mod ? true : false)
+		class=`key ${classes || ""}`
+		style=(width ? `width: ${width}px` : "")
+	)
+		+kb_label(code)
+	+kb_spacer(sp)
 
 
-mixin modifier(sp, code, classes="", width=0)
-	div(data-keypad-code=code, data-keypad-allow-autohold, class=`key ${classes}`, style=(width ? `width: ${width}px` : ""))
-		.label
-			| #[b &bull;]#[br]
-			block
-	+spacer(sp)
-
-
-mixin empty(sp, classes="", width=0)
-	div(class=`empty ${classes}`, style=(width ? `width:${width}px` : ""))
+mixin dk_empty(sp, classes, width)
+	div(class=`empty ${classes || ""}`, style=(width ? `width:${width}px` : ""))
 		.label &nbsp;
-	+spacer(sp)
+	+kb_spacer(sp)
 
 
-mixin lamp(cls)
-	img(class=`inline-lamp-small ${cls} led-gray` src=`${svg_dir}/led-square.svg`)
+//- Compact: a 20-column grid per row, so a row can never be wider than the
+//- viewport. `span` is in grid columns, not pixels.
+mixin ck(code, span)
+	- var k = KB_KEYS[code]
+	div(
+		data-keypad-code=code
+		data-keypad-allow-autohold=(k.mod ? true : false)
+		class="key"
+		style=`--kc: ${span}`
+	)
+		+kb_label(code)
 
+
+mixin ck_blank(span)
+	div(class="empty" style=`--kc: ${span}`)
+
+
+mixin ck_row(layer)
+	div(class="keypad-row" data-keypad-layer=layer)
+		block
 
 .hidden.window#keyboard-window(data-wm-window-show-centered)
 	.window-header#keyboard-window-header
@@ -37,200 +207,222 @@ mixin lamp(cls)
 			button(data-wm-window-set-original)
 			button(data-wm-window-close)
 
+	//- Layer picker. Only shown in the compact layout, where one layer is
+	//- visible at a time; desktop shows every key at once and does not need it.
+	.keypad-layers#keyboard-layers
+		each layer in KB_LAYERS
+			button(type="button" data-keypad-layer-button=layer.id)= layer.title
+
+	//- ===================== desktop: every key, at once =====================
 	.keypad#keyboard-desktop(align="center")
 		.keypad-block
 			.keypad-row
-				+key(2, "Escape", "small") Esc
-				+empty(1, "", 24)
-				each key in ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
-					+key((key != "F12" ? 1 : 0), key, "small") #{key}
-					if key == "F4" || key == "F8"
-						+empty(1, "", 10)
+				+dk("Escape", 2, "small")
+				+dk_empty(1, "", 24)
+				each code in ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
+					+dk(code, (code != "F12" ? 1 : 0), "small")
+					if code == "F4" || code == "F8"
+						+dk_empty(1, "", 10)
 			hr
 			.keypad-row
-				+key(1, "Backquote") ~#[br]`
-				each key, index in ["!", "@", "#", "$", "%", "^", "&", "*", "("]
-					+key(1, `Digit${index + 1}`) #{key}#[br]#{index + 1}
-				+key(1, "Digit0") )#[br]0
-				+key(1, "Minus") _#[br]-
-				+key(1, "Equal") +#[br]=
-				+key(0, "Backspace", "wide-1 right") &#8612;
+				+dk("Backquote", 1)
+				each code in ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0"]
+					+dk(code, 1)
+				+dk("Minus", 1)
+				+dk("Equal", 1)
+				+dk("Backspace", 0, "wide-1 right")
 			.keypad-row
-				+key(1, "Tab", "wide-1 left") &#8676;#[br]&#8677;
-				each key in ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
-					+key(1, `Key${key}`, "single") #{key}
-				+key(1, "BracketLeft") {#[br][
-				+key(1, "BracketRight") }#[br]]
-				+key(0, "Backslash") |#[br]&bsol;
+				+dk("Tab", 1, "wide-1 left")
+				each letter in ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
+					+dk(`Key${letter}`, 1, "single")
+				+dk("BracketLeft", 1)
+				+dk("BracketRight", 1)
+				+dk("Backslash", 0)
 			.keypad-row
-				+key(1, "CapsLock", "wide-2 left small")
-					+lamp("hid-keyboard-caps-led")
-					| #[br] Caps Lock
-				each key in ["A", "S", "D", "F", "G", "H", "J", "K", "L"]
-					+key(1, `Key${key}`, "single") #{key}
-				+key(1, "Semicolon") :#[br];
-				+key(1, "Quote") "#[br]'
-				+key(0, "Enter", "wide-2 right small") Enter#[br]&crarr;
+				+dk("CapsLock", 1, "wide-2 left small")
+				each letter in ["A", "S", "D", "F", "G", "H", "J", "K", "L"]
+					+dk(`Key${letter}`, 1, "single")
+				+dk("Semicolon", 1)
+				+dk("Quote", 1)
+				+dk("Enter", 0, "wide-2 right small")
 			.keypad-row
-				+modifier(1, "ShiftLeft", "wide-3 left small") Shift
-				each key in ["Z", "X", "C", "V", "B", "N", "M"]
-					+key(1, `Key${key}`, "single") #{key}
-				+key(1, "Comma") &lt;#[br],
-				+key(1, "Period") &gt;#[br].
-				+key(1, "Slash") ?#[br]/
-				+modifier(0, "ShiftRight", "wide-3 right small") Shift
+				+dk("ShiftLeft", 1, "wide-3 left small")
+				each letter in ["Z", "X", "C", "V", "B", "N", "M"]
+					+dk(`Key${letter}`, 1, "single")
+				+dk("Comma", 1)
+				+dk("Period", 1)
+				+dk("Slash", 1)
+				+dk("ShiftRight", 0, "wide-3 right small")
 			.keypad-row
-				+modifier(2, "ControlLeft", "wide-1 left small") Ctrl
-				+modifier(2, "MetaLeft", "wide-1 left small") Win
-				+modifier(2, "AltLeft", "wide-1 left small") Alt
-				+key(2, "Space", "wide-4")
-				+modifier(2, "AltRight", "wide-1 right small") Alt
-				+modifier(2, "MetaRight", "wide-1 right small") Win
-				+key(2, "ContextMenu", "small") #[br]Menu
-				+modifier(0, "ControlRight", "wide-1 right small") Ctrl
+				+dk("ControlLeft", 2, "wide-1 left small")
+				+dk("MetaLeft", 2, "wide-1 left small")
+				+dk("AltLeft", 2, "wide-1 left small")
+				+dk("Space", 2, "wide-4")
+				+dk("AltRight", 2, "wide-1 right small")
+				+dk("MetaRight", 2, "wide-1 right small")
+				+dk("ContextMenu", 2, "small")
+				+dk("ControlRight", 0, "wide-1 right small")
 		.keypad-block
 			.keypad-row
-				+modifier(2, "PrintScreen", "small") Pt/Sq
-				+key(2, "ScrollLock", "small")
-					+lamp("hid-keyboard-scroll-led")
-					| #[br] ScrLk
-				+key(0, "Pause", "small") P/Brk
+				+dk("PrintScreen", 2, "small")
+				+dk("ScrollLock", 2, "small")
+				+dk("Pause", 0, "small")
 			hr
 			.keypad-row
-				+key(2, "Insert", "small") Ins
-				+key(2, "Home", "small") Home
-				+key(0, "PageUp", "small") PgUp
+				+dk("Insert", 2, "small")
+				+dk("Home", 2, "small")
+				+dk("PageUp", 0, "small")
 			.keypad-row
-				+key(2, "Delete", "small") Del
-				+key(2, "End", "small") End
-				+key(0, "PageDown", "small") PgDn
+				+dk("Delete", 2, "small")
+				+dk("End", 2, "small")
+				+dk("PageDown", 0, "small")
 			.keypad-row
 			.keypad-row
-				+empty(1, "")
-				+key(2, "ArrowUp") &uarr;
-				+empty(0, "")
+				+dk_empty(1, "")
+				+dk("ArrowUp", 2)
+				+dk_empty(0, "")
 			.keypad-row
-				+key(2, "ArrowLeft") &larr;
-				+key(2, "ArrowDown") &darr;
-				+key(0, "ArrowRight") &rarr;
+				+dk("ArrowLeft", 2)
+				+dk("ArrowDown", 2)
+				+dk("ArrowRight", 0)
 		.keypad-block
 			.keypad-row
-				+empty(2, "small")
-				+empty(2, "small")
-				+empty(2, "small")
-				+key(0, "Power", "small") PWR
+				+dk_empty(2, "small")
+				+dk_empty(2, "small")
+				+dk_empty(2, "small")
+				+dk("Power", 0, "small")
 			hr
 			.keypad-row
-				+key(2, "NumLock", "small")
-					+lamp("hid-keyboard-num-led")
-					| #[br] NmLk
-				+key(2, "NumpadDivide") /
-				+key(2, "NumpadMultiply") *
-				+key(0, "NumpadSubtract") -
+				+dk("NumLock", 2, "small")
+				+dk("NumpadDivide", 2)
+				+dk("NumpadMultiply", 2)
+				+dk("NumpadSubtract", 0)
 			.keypad-row
-				+key(2, "Numpad7", "small") 7#[br]Home
-				+key(2, "Numpad8", "small") 8#[br]&uarr;
-				+key(2, "Numpad9", "small") 9#[br]PgUp
-				+empty(0, "")
+				+dk("Numpad7", 2, "small")
+				+dk("Numpad8", 2, "small")
+				+dk("Numpad9", 2, "small")
+				+dk_empty(0, "")
 			.keypad-row
-				+key(2, "Numpad4", "small") 4#[br]&larr;
-				+key(2, "Numpad5", "small") 5#[br]#[br]
-				+key(2, "Numpad6", "small") 6#[br]&rarr;
-				+key(0, "NumpadAdd") +
+				+dk("Numpad4", 2, "small")
+				+dk("Numpad5", 2, "small")
+				+dk("Numpad6", 2, "small")
+				+dk("NumpadAdd", 0)
 			.keypad-row
-				+key(2, "Numpad1", "small") 1#[br]End
-				+key(2, "Numpad2", "small") 2#[br]&darr;
-				+key(2, "Numpad3", "small") 3#[br]PgDn
-				+empty(0, "")
+				+dk("Numpad1", 2, "small")
+				+dk("Numpad2", 2, "small")
+				+dk("Numpad3", 2, "small")
+				+dk_empty(0, "")
 			.keypad-row
-				+key(2, "Numpad0", "small") 0#[br]Ins
-				+empty(2, "")
-				+key(2, "NumpadDecimal", "small") .#[br]Del
-				+key(0, "NumpadEnter", "small") Ent
+				+dk("Numpad0", 2, "small")
+				+dk_empty(2, "")
+				+dk("NumpadDecimal", 2, "small")
+				+dk("NumpadEnter", 0, "small")
 		.keypad-block
 			.keypad-row
-				+key(0, "IntlBackslash", "small") &bsol;#[br]|
+				+dk("IntlBackslash", 0, "small")
 			hr
 			.keypad-row
-				+key(0, "IntlYen", "small") ¥#[br]_
+				+dk("IntlYen", 0, "small")
 			.keypad-row
-				+key(0, "IntlRo", "small") &bsol;#[br]ろ
+				+dk("IntlRo", 0, "small")
 			.keypad-row
-				+modifier(0, "KanaMode", "small") Kana
+				+dk("KanaMode", 0, "small")
 			.keypad-row
-				+modifier(0, "NonConvert", "small") N/Cnv
+				+dk("NonConvert", 0, "small")
 			.keypad-row
-				+modifier(0, "Convert", "small") Cnv
+				+dk("Convert", 0, "small")
 
-	.keypad#keyboard-mobile(align="center")
-		.keypad-block
-			.keypad-row
-				+key(1, "Escape", "small") Esc
-				+key(0, "F1", "wide-0 small rounded-left") F1
-				+key(0, "F2", "wide-0 small rounded-none") F2
-				+key(0, "F3", "wide-0 small rounded-none") F3
-				+key(2, "F4", "wide-0 small rounded-right") F4
-				+key(0, "F5", "wide-0 small rounded-left") F5
-				+key(0, "F6", "wide-0 small rounded-none") F6
-				+key(0, "F7", "wide-0 small rounded-none") F7
-				+key(2, "F8", "wide-0 small rounded-right") F8
-				+key(0, "F9", "wide-0 small rounded-left") F9
-				+key(0, "F10", "wide-0 small rounded-none") F10
-				+key(0, "F11", "wide-0 small rounded-none") F11
-				+key(2, "F12", "wide-0 small rounded-right") F12
-				+modifier(1, "PrintScreen", "small") Pt/Sq
-				+key(1, "ScrollLock", "small")
-					+lamp("hid-keyboard-scroll-led")
-					| #[br] ScrLk
-				+key(1, "Pause", "small") P/Brk
-				+key(1, "Insert", "small") Ins
-				+key(1, "Home", "small") Home
-				+key(1, "End", "small") End
-				+key(0, "Delete", "small") Del
-			.keypad-row
-				+key(1, "Backquote") ~#[br]`
-				each key, index in ["!", "@", "#", "$", "%", "^", "&", "*", "("]
-					+key(1, `Digit${index + 1}`) #{key}#[br]#{index + 1}
-				+key(1, "Digit0") )#[br]0
-				+key(1, "Minus") _#[br]-
-				+key(1, "Equal") +#[br]=
-				+key(0, "Backspace", "wide-2 right", 101) &#8612;
-			.keypad-row
-				+key(1, "Tab", "wide-1 left") &#8676;<br>&#8677;
-				each key in ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
-					+key(1, `Key${key}`, "single") #{key}
-				+key(1, "BracketLeft") {#[br][
-				+key(1, "BracketRight") }#[br]]
-				+key(0, "Backslash", "wide-1 left", 78) |#[br]&bsol;
-			.keypad-row
-				+key(1, "CapsLock", "wide-2 left small")
-					+lamp("hid-keyboard-caps-led")
-					| #[br] Caps Lock
-				each key in ["A", "S", "D", "F", "G", "H", "J", "K", "L"]
-					+key(1, `Key${key}`, "single") #{key}
-				+key(1, "Semicolon") :#[br];
-				+key(1, "Quote") `#[br]'
-				+key(0, "Enter", "wide-3 right small", 116) Enter#[br]&crarr;
-			.keypad-row
-				+modifier(1, "ShiftLeft", "wide-3 left small") Shift
-				each key in ["Z", "X", "C", "V", "B", "N", "M"]
-					+key(1, `Key${key}`, "single") #{key}
-				+key(1, "Comma") &lt;#[br],
-				+key(1, "Period") &gt;#[br].
-				+key(1, "Slash") ?#[br]/
-				+key(2, "PageUp", "small") PgUp
-				+key(2, "ArrowUp") &uarr;
-				+key(0, "PageDown", "small") PgDn
-			.keypad-row
-				+modifier(1, "ControlLeft", "wide-1 left small") Ctrl
-				+modifier(1, "MetaLeft", "wide-1 left small") Win
-				+modifier(1, "AltLeft", "wide-1 left small") Alt
-				+key(1, "Space", "", 190)
-				+modifier(1, "AltRight", "right small") Alt
-				+modifier(1, "MetaRight", "right small") Win
-				+key(1, "ContextMenu", "small") #[br]Menu
-				+modifier(1, "ShiftRight", "right small") Shift
-				+modifier(1, "ControlRight", "right small") Ctrl
-				+key(2, "ArrowLeft") &larr;
-				+key(2, "ArrowDown") &darr;
-				+key(0, "ArrowRight") &rarr;
+	//- ============ compact: the same keys, one layer at a time ============
+	//- Every row is a 20-column grid, so no row can exceed the viewport. The
+	//- five layers together cover all 111 codes -- a phone reaches everything
+	//- a desktop does, which was not true before.
+	.keypad#keyboard-compact(data-layer="abc")
+		+ck_row("abc")
+			each letter in ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
+				+ck(`Key${letter}`, 2)
+		+ck_row("abc")
+			+ck_blank(1)
+			each letter in ["A", "S", "D", "F", "G", "H", "J", "K", "L"]
+				+ck(`Key${letter}`, 2)
+			+ck_blank(1)
+		+ck_row("abc")
+			+ck("ShiftLeft", 3)
+			each letter in ["Z", "X", "C", "V", "B", "N", "M"]
+				+ck(`Key${letter}`, 2)
+			+ck("Backspace", 3)
+		+ck_row("abc")
+			+ck("ControlLeft", 3)
+			+ck("AltLeft", 3)
+			+ck("Space", 5)
+			+ck("Comma", 2)
+			+ck("Period", 2)
+			+ck("Enter", 5)
+
+		+ck_row("sym")
+			each code in ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0"]
+				+ck(code, 2)
+		+ck_row("sym")
+			+ck_blank(1)
+			each code in ["Backquote", "Minus", "Equal", "BracketLeft", "BracketRight", "Backslash", "Semicolon", "Quote", "Slash"]
+				+ck(code, 2)
+			+ck_blank(1)
+		+ck_row("sym")
+			+ck("Tab", 4)
+			+ck("CapsLock", 4)
+			+ck("ContextMenu", 4)
+			+ck("ShiftRight", 4)
+			+ck("MetaLeft", 4)
+
+		+ck_row("fn")
+			+ck("Escape", 2)
+			each code in ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"]
+				+ck(code, 2)
+		+ck_row("fn")
+			each code in ["F10", "F11", "F12"]
+				+ck(code, 2)
+			+ck("PrintScreen", 4)
+			+ck("ScrollLock", 4)
+			+ck("Pause", 4)
+			+ck("Power", 2)
+		+ck_row("fn")
+			each code in ["Insert", "Home", "PageUp", "Delete", "End", "PageDown"]
+				+ck(code, 3)
+			+ck_blank(2)
+		+ck_row("fn")
+			each code in ["ArrowLeft", "ArrowUp", "ArrowDown", "ArrowRight"]
+				+ck(code, 3)
+			+ck("MetaRight", 4)
+			+ck("AltRight", 4)
+
+		+ck_row("num")
+			+ck("NumLock", 5)
+			+ck("NumpadDivide", 5)
+			+ck("NumpadMultiply", 5)
+			+ck("NumpadSubtract", 5)
+		+ck_row("num")
+			+ck("Numpad7", 5)
+			+ck("Numpad8", 5)
+			+ck("Numpad9", 5)
+			+ck("NumpadAdd", 5)
+		+ck_row("num")
+			+ck("Numpad4", 5)
+			+ck("Numpad5", 5)
+			+ck("Numpad6", 5)
+			+ck_blank(5)
+		+ck_row("num")
+			+ck("Numpad1", 5)
+			+ck("Numpad2", 5)
+			+ck("Numpad3", 5)
+			+ck("NumpadEnter", 5)
+		+ck_row("num")
+			+ck("Numpad0", 10)
+			+ck("NumpadDecimal", 5)
+			+ck_blank(5)
+
+		+ck_row("intl")
+			each code in ["IntlBackslash", "IntlYen", "IntlRo", "KanaMode", "NonConvert"]
+				+ck(code, 4)
+		+ck_row("intl")
+			+ck("Convert", 4)
+			+ck("ControlRight", 4)
+			+ck_blank(12)

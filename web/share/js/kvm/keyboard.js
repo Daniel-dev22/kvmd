@@ -38,7 +38,12 @@ export function Keyboard(__recordWsEvent) {
 	var __el_magic = null;
 
 	var __init__ = function() {
+		// Built on the whole window, so it binds BOTH arrangements. Keypad
+		// resolves a code to every element carrying it, which is what keeps
+		// modifier state in step between the desktop and compact boards.
 		__keypad = new Keypad($("keyboard-window"), __sendKey);
+
+		__initLayers();
 
 		$("hid-keyboard-led").title = "Keyboard free";
 
@@ -370,6 +375,28 @@ export function Keyboard(__recordWsEvent) {
 				__innerSendKey(code, state, true);
 			}
 		}
+	};
+
+	// The compact board shows one layer at a time. Desktop ignores this
+	// entirely -- it shows every key at once and the picker is not rendered.
+	var __setLayer = function(layer) {
+		let el_keypad = $("keyboard-compact");
+		if (el_keypad === null) {
+			return;
+		}
+		el_keypad.setAttribute("data-layer", layer);
+		tools.storage.set("hid.keyboard.layer", layer);
+		for (let el_bt of $$$("[data-keypad-layer-button]")) {
+			let on = (el_bt.getAttribute("data-keypad-layer-button") === layer);
+			el_bt.setAttribute("aria-pressed", String(on));
+		}
+	};
+
+	var __initLayers = function() {
+		for (let el_bt of $$$("[data-keypad-layer-button]")) {
+			tools.el.setOnClick(el_bt, () => __setLayer(el_bt.getAttribute("data-keypad-layer-button")));
+		}
+		__setLayer(tools.storage.get("hid.keyboard.layer", "abc"));
 	};
 
 	var __innerSendKey = function(code, state, allow_finish) {

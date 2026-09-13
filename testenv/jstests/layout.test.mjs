@@ -133,39 +133,96 @@ describe("a finger can hit the controls", {"skip": chromiumPath() ? false : "no 
 	});
 });
 
-// Measured on the branch at 390px: keys come out at 51.2 x 51.2 CSS px, which
-// clears the minimum -- but the widest row still needs 741px in a 390px
-// viewport, and div.window is overflow:hidden, so the right-hand half of the
-// keyboard is simply not there. Phase 2 replaces the fixed pixel widths with a
-// viewport-derived key unit.
-describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
-	const showKeyboard = `document.getElementById("keyboard-window").classList.remove("hidden");`;
+// The compact board is a 20-column grid per row, so a row is a fraction of the
+// viewport by construction. Before Phase 2 the widest row needed 741px on a
+// 390px screen and div.window is overflow:hidden -- the right-hand half of the
+// keyboard was not clipped-but-scrollable, it was absent.
+//
+// Height is the touch-target dimension that matters for a keyboard: every
+// native on-screen keyboard has keys narrower than they are tall. Width is
+// therefore checked RELATIVE to the screen -- the board is a 20-column grid, so
+// an absolute pixel floor would be a different requirement on every device.
+// viewport/12 means at least ten keys sit comfortably across, which is what a
+// native keyboard gives you (iOS letter keys are ~1/11th of the screen).
+const minKeyWidth = (viewport) => viewport / 12;
 
-	test("keys meet the minimum touch target", async () => {
-		const pg = await open("web/kvm/index.html", 390);
-		const small = await pg.eval(`
-			(() => {
-				${showKeyboard}
-				return [...document.querySelectorAll("#keyboard-mobile .key")]
-					.map((el) => { let r = el.getBoundingClientRect(); return {k: el.dataset.keypadCode, w: Math.round(r.width), h: Math.round(r.height)}; })
-					.filter((m) => m.h < ${MIN_TARGET});
-			})()
-		`);
+describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	const LAYERS = ["abc", "sym", "fn", "num", "intl"];
+	const SHOW = `document.getElementById("keyboard-window").classList.remove("hidden");`;
+
+	async function openKeyboard(width = 390) {
+		const pg = await open("web/kvm/index.html", width);
+		assert.equal(await pg.eval("document.documentElement.dataset.ui"), "mobile",
+			"precondition: the compact board only exists in the compact layout");
+		await pg.eval(SHOW);
+		return pg;
+	}
+
+	for (const width of [320, 390]) {
+		for (const layer of LAYERS) {
+			test(`the ${layer} layer fits a ${width}px screen`, async () => {
+			const pg = await openKeyboard(width);
+			const m = await pg.eval(`(() => {
+				document.querySelector('[data-keypad-layer-button="${layer}"]').click();
+				const rows = [...document.querySelectorAll('#keyboard-compact [data-keypad-layer="${layer}"]')];
+				const keys = rows.flatMap((r) => [...r.querySelectorAll(".key")]);
+				return {
+					shown: rows.filter((r) => r.getBoundingClientRect().height > 0).length,
+					rows: rows.length,
+					widest: Math.max(...rows.map((r) => Math.round(r.scrollWidth))),
+					keys: keys.length,
+					small: keys.map((el) => {
+						const r = el.getBoundingClientRect();
+						return {k: el.dataset.keypadCode, w: Math.round(r.width), h: Math.round(r.height)};
+					}).filter((k) => k.h < ${MIN_TARGET} || k.w < ${minKeyWidth(width)}),
+				};
+			})()`);
+			await pg.close();
+			assert.equal(m.shown, m.rows, `the ${layer} layer did not become visible when its button was clicked`);
+			assert.ok(m.keys > 0, `the ${layer} layer rendered no keys`);
+			assert.ok(m.widest <= width,
+				`the ${layer} layer needs ${m.widest}px on a ${width}px screen`);
+			assert.deepEqual(m.small, [],
+				`keys under ${Math.round(minKeyWidth(width))}x${MIN_TARGET}px on the ${layer} layer at ${width}px: ${JSON.stringify(m.small)}`);
+			});
+		}
+	}
+
+	test("only the chosen layer is on screen", async () => {
+		const pg = await openKeyboard();
+		const visible = await pg.eval(`(() => {
+			document.querySelector('[data-keypad-layer-button="num"]').click();
+			const rows = [...document.querySelectorAll("#keyboard-compact [data-keypad-layer]")];
+			return rows.filter((r) => r.getBoundingClientRect().height > 0)
+				.map((r) => r.dataset.keypadLayer);
+		})()`);
 		await pg.close();
-		assert.deepEqual(small, [], `keys shorter than ${MIN_TARGET}px: ${JSON.stringify(small)}`);
+		assert.deepEqual([...new Set(visible)], ["num"],
+			`layers on screen at once: ${[...new Set(visible)].join(", ")}`);
 	});
 
-	test("every row fits the viewport", {"skip": "Phase 2: rows are still sized in fixed pixels (741px at 390px)"}, async () => {
-		const pg = await open("web/kvm/index.html", 390);
-		const wide = await pg.eval(`
-			(() => {
-				${showKeyboard}
-				return [...document.querySelectorAll("#keyboard-mobile .keypad-row")]
-					.map((el, i) => ({row: i, needs: Math.round(el.scrollWidth)}))
-					.filter((m) => m.needs > 390);
-			})()
-		`);
+	test("the desktop board is not rendered in the compact layout", async () => {
+		const pg = await openKeyboard();
+		const h = await pg.eval(`(() => {
+			const el = document.getElementById("keyboard-desktop");
+			return Math.round(el.getBoundingClientRect().height);
+		})()`);
 		await pg.close();
-		assert.deepEqual(wide, [], `rows wider than the viewport: ${JSON.stringify(wide)}`);
+		assert.equal(h, 0, "the desktop board is still taking space on a phone");
+	});
+
+	test("the keyboard can be dismissed on a phone", async () => {
+		// kvm/x-mobile.css used to hide the window header outright, so the
+		// keyboard could be neither moved nor closed once it was up.
+		const pg = await openKeyboard();
+		const box = await pg.eval(`(() => {
+			const bt = document.querySelector("#keyboard-window [data-wm-window-close]");
+			if (!bt) return null;
+			const r = bt.getBoundingClientRect();
+			return {w: Math.round(r.width), h: Math.round(r.height)};
+		})()`);
+		await pg.close();
+		assert.ok(box, "the keyboard window has no close button");
+		assert.ok(box.w > 0 && box.h > 0, `the close button is not visible: ${JSON.stringify(box)}`);
 	});
 });
