@@ -23,6 +23,7 @@
 import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
+import {UI_MOBILE} from "../ui.js";
 import {printText} from "./print.js";
 import {diffTyped, makePrintQueue} from "./typing.js";
 
@@ -395,6 +396,7 @@ export function Keyboard(__recordWsEvent) {
 	var __composing = false;
 	var __printer = null;
 	var __blur_timer = null;
+	var __exitTyping = null;
 
 	var __initTyping = function() {
 		let el = $("hid-type-input");
@@ -418,6 +420,20 @@ export function Keyboard(__recordWsEvent) {
 		// what a phone keyboard CANNOT send stays: Esc, the modifiers, Tab and
 		// the arrows. The layer picker stays too, so the full board is one tap
 		// away; tapping it dismisses the system keyboard.
+		// On a phone this window is opened to TYPE far more often than to send a
+		// scancode, and the bar that starts that sits BELOW the whole board --
+		// which is exactly why it gets missed. Opening straight into typing mode
+		// puts the phone's own keyboard up with only the keys it cannot send
+		// above it. The layer picker still expands the full board in one tap.
+		let el_win = $("keyboard-window");
+		if (el_win !== null) {
+			el_win.show_hook = function() {
+				if (document.documentElement.getAttribute("data-ui") === UI_MOBILE) {
+					el.focus();
+				}
+			};
+		}
+
 		el.addEventListener("focus", function() {
 			if (__blur_timer !== null) {
 				clearTimeout(__blur_timer);
@@ -426,6 +442,20 @@ export function Keyboard(__recordWsEvent) {
 			document.documentElement.setAttribute("data-typing", "1");
 			wm.organizeAllWindows();
 		});
+		__exitTyping = function() {
+			// An explicit layer choice is not the momentary blur the debounce
+			// below exists to absorb, so it leaves typing mode at once. Waiting
+			// out the 200ms meant the board did not come back on the tap that
+			// asked for it, which is the whole of "one tap away".
+			if (__blur_timer !== null) {
+				clearTimeout(__blur_timer);
+				__blur_timer = null;
+			}
+			el.blur();
+			document.documentElement.removeAttribute("data-typing");
+			wm.organizeAllWindows();
+		};
+
 		el.addEventListener("blur", function() {
 			// Pressing a key in the strip must not collapse and re-expand the
 			// sheet under the user's finger, so a momentary blur is ignored.
@@ -505,9 +535,8 @@ export function Keyboard(__recordWsEvent) {
 			tools.el.setOnClick(el_bt, function() {
 				// Choosing a layer means you want the scancode board, so let go
 				// of the typing field and put the system keyboard away.
-				let el_type = $("hid-type-input");
-				if (el_type !== null) {
-					el_type.blur();
+				if (__exitTyping !== null) {
+					__exitTyping();
 				}
 				__setLayer(el_bt.getAttribute("data-keypad-layer-button"));
 			});

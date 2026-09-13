@@ -395,33 +395,50 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.equal(fired, 1, "focus() did not fire a focus event -- focus-driven behaviour is untested");
 	});
 
-	test("typing collapses the scancode board but keeps what a phone cannot send", async () => {
+	test("the compact keyboard opens ready to type, and the board is one tap back", async () => {
+		// On a phone this window is opened to type far more often than to send a
+		// scancode, and the bar that starts that sat BELOW the whole board --
+		// so it was never found and the redundant letter keys ate the screen.
+		// It now opens in typing mode. The round trip is asserted in both
+		// directions: a layer tap must bring the board straight back, which is
+		// what "one tap away" means and what the 200ms blur debounce used to eat.
 		const pg = await openKeyboard();
-		const before = await pg.eval(`(() => {
-			const vis = (s) => [...document.querySelectorAll(s)].filter((e) => e.getBoundingClientRect().height > 0).length;
-			return {rows: vis("#keyboard-compact [data-keypad-layer]"),
-				h: Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height)};
-		})()`);
-		await pg.eval(`document.getElementById("hid-type-input").focus()`);
-		await pg.eval("new Promise((r) => setTimeout(r, 150))");
-		const during = await pg.eval(`(() => {
-			const vis = (s) => [...document.querySelectorAll(s)].filter((e) => e.getBoundingClientRect().height > 0).length;
-			return {typing: document.documentElement.getAttribute("data-typing"),
+		const vis = `(s) => [...document.querySelectorAll(s)].filter((e) => e.getBoundingClientRect().height > 0).length`;
+		const snap = `(() => {
+			const vis = ${vis};
+			return {
+				typing: document.documentElement.getAttribute("data-typing"),
 				rows: vis("#keyboard-compact [data-keypad-layer]"),
 				strip: vis("#keyboard-compact [data-keypad-persistent] .key"),
 				bar: vis("#hid-type-input"),
 				picker: vis("#keyboard-layers button"),
-				h: Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height)};
-		})()`);
+				h: Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height),
+			};
+		})()`;
+
+		const opened = await pg.eval(snap);
+		assert.equal(opened.typing, "1", "the compact keyboard must open in typing mode");
+		assert.equal(opened.rows, 0, "the redundant scancode layers must not be on screen while the phone's own keyboard is");
+		assert.ok(opened.strip >= 10, `only ${opened.strip} strip keys -- the arrows and modifiers a phone cannot send must stay`);
+		assert.equal(opened.bar, 1, "the typing bar must be on screen");
+		assert.ok(opened.picker > 0, "the layer picker must stay, so the board is one tap away");
+
+		// One tap on the picker, and the full board is back immediately.
+		await pg.eval(`document.querySelector('[data-keypad-layer-button="abc"]').click()`);
+		const tapped = await pg.eval(snap);
+		assert.equal(tapped.typing, null, "a layer tap must leave typing mode at once, not after the blur debounce");
+		assert.ok(tapped.rows > 0, "the scancode board did not come back on the tap that asked for it");
+		assert.ok(tapped.h > opened.h, `the sheet did not grow for the board (${opened.h}px -> ${tapped.h}px)`);
+
+		// And back into typing mode, which is what gives the space to the video.
+		await pg.eval(`document.getElementById("hid-type-input").focus()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 150))");
+		const typing = await pg.eval(snap);
 		await pg.close();
-		assert.ok(before.rows > 0, "the board was not showing to begin with");
-		assert.equal(during.typing, "1", "typing mode never engaged");
-		assert.equal(during.rows, 0, "the scancode layers are still on screen while the system keyboard is up");
-		assert.ok(during.strip >= 10, `only ${during.strip} strip keys remain -- arrows and modifiers must stay`);
-		assert.equal(during.bar, 1, "the typing bar disappeared");
-		assert.ok(during.picker > 0, "the layer picker must stay, so the board is one tap away");
-		assert.ok(during.h < before.h,
-			`the sheet did not shrink (${before.h}px -> ${during.h}px); the space should go back to the video`);
+		assert.equal(typing.typing, "1", "typing mode never re-engaged");
+		assert.equal(typing.rows, 0, "the scancode layers are still on screen while the system keyboard is up");
+		assert.ok(typing.h < tapped.h,
+			`the sheet did not shrink again (${tapped.h}px -> ${typing.h}px); the space should go back to the video`);
 	});
 
 	test("choosing a layer leaves typing mode and shows that layer", async () => {

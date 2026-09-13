@@ -2,7 +2,7 @@ mixin color_slider_tr(name, title)
 	tr
 		td(style="white-space: nowrap") #{title}:
 		td #[input(type="color" id=`switch-color-${name}-input`)]
-		td #[input(type="range" id=`switch-color-${name}-brightness-slider` style="min-width: 150px")]
+		td #[input(type="range" id=`switch-color-${name}-brightness-slider` style="min-width:min(150px,30vw)")]
 		td &nbsp;&nbsp;&nbsp;
 		td #[button(id=`switch-color-${name}-default-button` class="small" title="Reset default") &#8635;]
 
@@ -27,7 +27,7 @@ li.right.feature-disabled#switch-dropdown
 			hr
 
 		+menu_spoiler("EDIDs collection")
-			table.kv
+			table.kv.wide
 				tr
 					td(colspan="2", style="width: 40%;")
 						select#switch-edid-selector(
