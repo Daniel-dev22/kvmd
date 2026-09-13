@@ -1,11 +1,11 @@
 # Mobile-first web UI — Phase 5 handoff (nothing clipped; a strip that fits a thumb)
 
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`).
-**Commits:** `66b9f1e4` (the phase) and `cf715405` (review fixes + device feedback).
+**Commits:** `66b9f1e4` (the phase), `cf715405` (review fixes + device feedback), `5808dc3d` (pad on demand, scrolling sheets, a tighter strip).
 **Status:** committed, **deployed to kd and used on a real phone**. NOT merged to `master`.
 **Read first:** `MOBILE_UI_PHASE1/2/3/4_HANDOFF.md`. This supersedes Phase 4's "what's next".
 
-**155 tests, 155 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
+**158 tests, 158 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
 tox env. 28 of them are in the new `testenv/jstests/menus.test.mjs`.
 
 ---
@@ -59,7 +59,24 @@ opens in typing mode: the phone's own keyboard, with only what it cannot send ab
 layer leaves typing mode **at once** rather than after the 200ms blur debounce; without that the
 board did not come back on the tap that asked for it, which is the whole of "one tap away".
 
-### 5. Everything else found by measuring
+### 5. Three things that only using it on a phone found (`5808dc3d`)
+
+- **The mouse pad was forced on screen on every compact load** (`kvm/main.js`). With the keyboard
+  sheet and the system keyboard up as well there was no video left. It is now opened on demand, from
+  a new button in the Keyboard window's header — the mirror of the keyboard button the pad's own
+  header already carried — and from System → Mouse.
+- **A docked sheet taller than the screen ran off the TOP.** It grows upwards from the bottom edge,
+  so the full board on a short phone went past the navbar with `div.window`'s `overflow: hidden`
+  swallowing it. Capped to the space between the navbar and the system keyboard, scrolling inside
+  itself. 📏 The test runs at 320×360, because at 480 the board fits either way and the cap is not
+  under test at all.
+- **The strip was trimmed again**: labels 13px, status LEDs 16px, with a 44px floor so trimming the
+  label cannot trim the target. **905px → 785px**, System 181px → 153px. At 390px the first screenful
+  is now the back-link, System **and** Switch complete, with ATX peeking.
+  📏 An icons-only strip was **rejected, not tried**: ATX and Switch carry the same two LEDs, and
+  Shortcuts and GPIO have no icon at all, so it is ambiguous for four of the eight.
+
+### 6. Everything else found by measuring
 
 | Defect | Cause |
 |---|---|
@@ -192,15 +209,7 @@ reviewed commit.
 
 ## Next phase — first concrete step
 
-Two live requests from using it on a phone, neither started:
-
-1. **The keyboard window should scroll.** With the board expanded on a short phone the lower rows are
-   unreachable. `div.window` is `overflow: hidden`.
-2. **The mouse pad should be dismissible from a button**, because with the system keyboard up the pad
-   plus the sheet cover the video entirely. `#mouse-window` already has a close control; what is
-   missing is a way back that does not cost a navbar slot.
-
-Then Phase 4's item 4, still entirely open and now the largest remaining gap — **touch input
+Phase 4's item 4 is now the whole of what is left, and it is entirely open — **touch input
 correctness**:
 
 - `locked` modifier state is unreachable by touch — `web/share/js/keypad.js` only upgrades to
