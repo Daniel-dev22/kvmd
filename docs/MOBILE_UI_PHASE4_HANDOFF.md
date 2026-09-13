@@ -1,4 +1,9 @@
-# Mobile-first web UI — state, and what Phase 4 must do
+# Mobile-first web UI — Phase 4 handoff (real-device fixes)
+
+> **Superseded by `MOBILE_UI_PHASE5_HANDOFF.md`.** Everything under "Phase 4 scope" below
+> was built in Phase 5 (`66b9f1e4`, `cf715405`); the heading was misleading -- this document
+> is the handoff written AFTER Phase 4 and describes what the NEXT phase had to do. Item 4,
+> touch input correctness, is the only part still open.
 
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`). **Deployed to kd. Not merged.**
 **Read first:** `MOBILE_UI_PHASE1/2/3_HANDOFF.md`. This one supersedes their "what's next".
