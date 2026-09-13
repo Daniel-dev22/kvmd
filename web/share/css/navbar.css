@@ -134,6 +134,15 @@ ul#navbar li div.menu {
 	box-shadow: var(--shadow-big);
 	z-index: 2147483645;
 }
+/* The paste sheet is capped so it does not stretch to the width of its longest
+   line. This lives here rather than as an inline style on the element, because
+   an inline width beats a stylesheet rule at any specificity -- which is how
+   the compact sheet, which must span the viewport, was coming out 360px wide
+   with a 30px strip of stream showing beside it. */
+:root[data-ui="desktop"] ul#navbar li div.menu#text-menu {
+	width: min(360px, 100vw);
+}
+
 ul#navbar li div.menu-active {
 	border: var(--border-navbar-menu-active-2px) !important;
 	border-top: var(--border-navbar-menu-top-thin) !important;
@@ -286,6 +295,9 @@ ul.navbar-bg-tips li a {
 	overflow-y: hidden;
 	scrollbar-width: none;
 	-webkit-overflow-scrolling: touch;
+	/* Named so the edge cues below can hang off this element's scroll position;
+	   see the @supports block. Inert where scroll timelines are unsupported. */
+	scroll-timeline: --navbar-strip inline;
 	padding-left: env(safe-area-inset-left);
 	padding-right: env(safe-area-inset-right);
 }
@@ -293,6 +305,95 @@ ul.navbar-bg-tips li a {
 :root[data-ui="mobile"] ul#navbar::-webkit-scrollbar {
 	display: none;
 }
+
+/* The strip is wider than any phone -- 621px at 390px on a bare device, and
+   1287px once a PiKVM Switch is attached -- and a flush edge says nothing
+   about that. This is the whole of the "the HDMI switcher vanished" report:
+   nothing was missing, but the Switch sat 726px past the right edge with no
+   affordance that the strip scrolls at all.
+
+   A fade over whichever edge still has content beyond it is that affordance.
+   The pseudo-elements are flex items pinned with `position: sticky` and pulled
+   back over the content by a negative margin, so they overlay the strip
+   without adding to its scroll width. */
+:root[data-ui="mobile"] ul#navbar::before,
+:root[data-ui="mobile"] ul#navbar::after {
+	content: "";
+	flex: 0 0 28px;
+	align-self: stretch;
+	position: sticky;
+	z-index: 1;
+	pointer-events: none;
+}
+:root[data-ui="mobile"] ul#navbar::before {
+	left: 0;
+	margin-right: -28px;
+	background: linear-gradient(to right, var(--cs-navbar-default-bg), transparent);
+	/* Nothing is hidden to the left until the strip has been scrolled, and
+	   without a scroll timeline this is the state that stays. */
+	opacity: 0;
+}
+:root[data-ui="mobile"] ul#navbar::after {
+	right: 0;
+	margin-left: -28px;
+	background: linear-gradient(to left, var(--cs-navbar-default-bg), transparent);
+}
+
+/* Where scroll-driven animations exist, each cue is shown only while there is
+   really something past that edge. Where they do not, the rules above stand on
+   their own: the right-hand cue is always on and the left-hand one never is,
+   which is correct at the only position the strip starts in. */
+@supports (animation-timeline: scroll()) {
+	:root[data-ui="mobile"] ul#navbar::before,
+	:root[data-ui="mobile"] ul#navbar::after {
+		/* animation-duration is deliberately left at its initial `auto`: on a
+		   progress-based timeline that is what scales the animation across
+		   animation-range. Any finite duration collapses it to a step. */
+		animation-timing-function: linear;
+		animation-fill-mode: both;
+		/* A NAMED timeline, declared on the strip and inherited by lookup.
+		   `scroll(self inline)` does not work here: applied to a pseudo-element
+		   `self` resolves to the pseudo, which is not a scroll container, and
+		   the timeline silently stays inactive -- attached, `playState:
+		   running`, and `currentTime: null` forever. */
+		animation-timeline: --navbar-strip;
+	}
+	:root[data-ui="mobile"] ul#navbar::before {
+		animation-name: navbar-cue-in;
+		animation-range: 0 28px;
+	}
+	:root[data-ui="mobile"] ul#navbar::after {
+		animation-name: navbar-cue-out;
+		animation-range: calc(100% - 28px) 100%;
+	}
+}
+@keyframes navbar-cue-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes navbar-cue-out {
+	from { opacity: 1; }
+	to { opacity: 0; }
+}
+
+/* Compact ORDER. On the desktop the right-hand group is laid out with
+   `float: right`, which renders it in reverse source order -- so Switch, the
+   first of the group in the DOM, is the one nearest the logo. In compact the
+   float is off and source order wins, which put Switch dead last: the exact
+   reversal that sent it 726px off-screen. Only Switch actually moves here; the
+   rest keep the order they already had.
+
+   Every dropdown is listed. A new one added without an entry gets the initial
+   `order: 0`, which lands it in front of System where it is impossible to
+   miss -- and testenv/jstests/layout.test.mjs fails on it by name. */
+:root[data-ui="mobile"] ul#navbar > li#system-dropdown { order: 1; }
+:root[data-ui="mobile"] ul#navbar > li#switch-dropdown { order: 2; }
+:root[data-ui="mobile"] ul#navbar > li#atx-dropdown { order: 3; }
+:root[data-ui="mobile"] ul#navbar > li#msd-dropdown { order: 4; }
+:root[data-ui="mobile"] ul#navbar > li#macro-dropdown { order: 5; }
+:root[data-ui="mobile"] ul#navbar > li#text-dropdown { order: 6; }
+:root[data-ui="mobile"] ul#navbar > li#shortcuts-dropdown { order: 7; }
+:root[data-ui="mobile"] ul#navbar > li#gpio-dropdown { order: 8; }
 
 :root[data-ui="mobile"] ul#navbar li {
 	float: none;
@@ -323,8 +424,81 @@ ul.navbar-bg-tips li a {
 	padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* A table is not a block: it shrink-to-fits, so it has to be told to stretch.
+   `width: 100%` is the wrong instruction -- a percentage resolves against the
+   containing block and the element's own margins are then added OUTSIDE it. So
+   table.kv (main.css: `margin: 0 10px`) came out 20px wider than the sheet on
+   every populated menu, and the sheet's `overflow-x: hidden` clipped it.
+   `stretch` means "the containing block MINUS my own margins", which is what
+   was meant -- and it stays correct if that margin ever changes, and it nests,
+   because each table resolves against its own containing block. The first two
+   spellings are the same keyword in Firefox and in Safari/older Chrome; later
+   declarations win where they are understood and are dropped where they are
+   not. */
 :root[data-ui="mobile"] ul#navbar li div.menu table {
-	width: 100%;
+	width: -moz-available;
+	width: -webkit-fill-available;
+	width: stretch;
+}
+
+/* Menu content is laid out as label/control TABLES, which is a desktop shape: a
+   table column can never be narrower than its widest unbreakable word, so at
+   phone width the columns are SQUEEZED rather than the row being allowed to
+   grow. The switch port list is the worst case -- it fits 8 columns into 370px
+   by rendering "Port:" as "Po rt:", "Host 1" as "Ho st 1" and "Reset" as "Re
+   set". Every cell was reachable and none of it was readable.
+
+   In compact a row becomes a flex line and each cell an item on it, so a row
+   that does not fit WRAPS instead of compressing. Only table.kv is converted,
+   and only through its own direct row/cell chain: the bare tables nested inside
+   it still need real table layout (menu_message's icon column is a rowspan,
+   menu_slider's is one row of two). A nested table.kv matches on its own. */
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv,
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv > tbody {
+	display: block;
+}
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv > tbody > tr {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	/* border-spacing does not apply to a flex line, so it is replaced here. */
+	gap: 5px;
+	padding: 3px 0;
+}
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv > tbody > tr > td {
+	display: block;
+}
+/* The slider's value cell is pinned to 40px so the desktop slider does not jump
+   about as the number changes. On a wrapped line there is no column to keep
+   steady, and 40px is not enough for "Unlimited", which was being broken across
+   two lines as "Unlimi/ted". It sizes to its value here.
+
+   Not scoped to a kv row: the cell is inside menu_slider's own nested table,
+   which stays a real table, so `table.kv > tbody > tr > td` never reaches it. */
+:root[data-ui="mobile"] ul#navbar li div.menu td.slider-value {
+	max-width: none;
+	white-space: nowrap;
+}
+
+/* A cell that exists only to hold a table column open has no job on a wrapped
+   line, and several of them carry `width: 100%`, which would take a whole line
+   to show nothing. `:empty` is live, so a cell JS later fills comes back. */
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv > tbody > tr > td:empty {
+	display: none;
+}
+
+/* Every control in main.css is a fixed 30px tall, which is a desktop row
+   height and assumes the label fits on one line. At phone width a 33%-wide
+   button is 130px, "• Show stream" wraps to two lines, and the second line was
+   painted outside the button's own background. The button grows to its label
+   instead, and gets a finger's worth of height while it is at it -- 44px is
+   the same minimum the navbar items are already held to. */
+:root[data-ui="mobile"] ul#navbar li div.menu button {
+	height: auto;
+	min-height: 44px;
+	padding-top: 4px;
+	padding-bottom: 4px;
+	line-height: 1.2;
 }
 
 :root[data-ui="mobile"] ul#navbar li div.menu td {

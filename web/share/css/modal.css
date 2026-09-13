@@ -32,7 +32,16 @@ div.modal {
 }
 
 div.modal div.modal-window {
-	display: table;
+	/* Shrink-to-fit, but never wider than the screen. It was `display: table`,
+	   which sizes to its content and IGNORES max-width when the content cannot
+	   shrink -- so the Add-EDID dialog came out 382px wide and lost 62px of
+	   itself, the OK button included, off the right of a 320px phone. A block
+	   at `fit-content` shrink-wraps the same way and does obey max-width; the
+	   `overflow: hidden` below then clips content rather than the window. */
+	display: block;
+	width: -moz-fit-content;
+	width: fit-content;
+	max-width: calc(100% - 16px);
 	outline: none;
 	margin: 15% auto;
 	overflow: hidden;

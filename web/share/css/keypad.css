@@ -238,6 +238,25 @@ div.keypad-layers {
 	overflow: hidden;
 }
 
+/* The 20-column grid above is the compact KEYBOARD's geometry -- every key on
+   that board carries its own `--kc` span, set inline per key. The mouse pad
+   reuses the same .keypad classes but is three buttons with no spans, so it
+   inherited `span 2`: three keys across twenty columns, 36px each, with
+   "Right" silently cut off by the `overflow: hidden` above. Each board sizes
+   itself instead.
+
+   This overrides for the mouse pad rather than re-scoping the rule above to
+   `#keyboard-compact`, on purpose: adding an id there would raise that
+   selector above `div#keyboard-compact div[data-keypad-layer] {display: none}`
+   in kvm/keyboard.css, and every keyboard layer would be shown at once. */
+:root[data-ui="mobile"] div#mouse-buttons div.keypad-row {
+	display: flex;
+}
+:root[data-ui="mobile"] div#mouse-buttons div.key {
+	/* Three buttons sharing the row, each wide enough for its own label. */
+	flex: 1 1 0;
+}
+
 /* The desktop label is centred with a 50% translate; flex centring here would
    double the offset. */
 :root[data-ui="mobile"] div.keypad div.label {

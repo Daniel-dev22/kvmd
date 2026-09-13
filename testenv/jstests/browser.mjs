@@ -8,7 +8,7 @@
 import {spawn} from "node:child_process";
 import {createServer} from "node:http";
 import {existsSync} from "node:fs";
-import {readFile} from "node:fs/promises";
+import {readFile, writeFile} from "node:fs/promises";
 import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
@@ -173,6 +173,14 @@ async function newPage(port) {
 				throw new Error(out.exceptionDetails.exception?.description || "evaluate failed");
 			}
 			return out.result.value;
+		},
+		// A PNG of the layout as rendered. The measurements above say a box is
+		// 390px wide; only this says whether it LOOKS right -- which for a phone
+		// UI is most of the question.
+		"screenshot": async (path) => {
+			const out = await send("Page.captureScreenshot", {"format": "png"});
+			await writeFile(path, Buffer.from(out.data, "base64"));
+			return path;
 		},
 		"close": () => ws.close(),
 	};

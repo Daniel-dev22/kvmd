@@ -220,6 +220,9 @@ textarea {
 	resize: none;
 	height: 120px;
 	width: 100%;
+	/* `width: 100%` plus a border is 2px wider than the box it sits in, which
+	   is how the paste sheet's textarea overflowed its own container by 6px. */
+	box-sizing: border-box;
 	border: var(--border-default-thin);
 	border-radius: 4px;
 	color: var(--cs-code-default-fg);
