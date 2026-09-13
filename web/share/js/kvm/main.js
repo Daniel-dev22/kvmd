@@ -25,24 +25,35 @@
 
 import {tools, $} from "../tools.js";
 import {checkBrowser} from "../bb.js";
+import {COMPACT_QUERY, UI_MOBILE, createUiSwitch} from "../ui.js";
 import {wm, initWindowManager} from "../wm.js";
 
 import {Session} from "./session.js";
 
 
 export function main() {
-	if (!checkBrowser("kvm/x-desktop.css", "kvm/x-mobile.css")) {
+	if (!checkBrowser()) {
 		return;
 	}
 
-	tools.radio.clickValue("page-ui-type-radio", tools.storage.get("page.ui.type", "auto"));
+	// base.pug stamped data-ui before first paint; this takes over the same
+	// switch so the radio can change the layout live. It used to reload the
+	// page here, which dropped the stream, the HID socket and any open form.
+	let ui = createUiSwitch({
+		"root": document.documentElement,
+		"mql": window.matchMedia(COMPACT_QUERY),
+		"pref": tools.storage.get("page.ui.type", "auto"),
+		"onChange": () => {
+			if (wm) { // Not yet built on the first, synchronous resolve
+				wm.organizeAllWindows();
+			}
+		},
+	});
+	tools.radio.clickValue("page-ui-type-radio", ui.getPref());
 	tools.radio.setOnClick("page-ui-type-radio", function() {
-		const ui = tools.radio.getValue("page-ui-type-radio");
-		if (tools.storage.get("page.ui.type") !== ui) {
-			tools.storage.set("page.ui.type", ui);
-			window.onbeforeunload = null;
-			window.location.href = window.location.href;
-		}
+		let pref = tools.radio.getValue("page-ui-type-radio");
+		tools.storage.set("page.ui.type", pref);
+		ui.setPref(pref);
 	}, false);
 
 	tools.storage.bindSimpleSwitch($("page-close-ask-switch"), "page.close.ask", true, function(value) {
@@ -72,7 +83,7 @@ export function main() {
 	}
 
 	wm.showWindow($("stream-window"));
-	if (tools.browser.is_mobile) {
+	if (ui.current() === UI_MOBILE) {
 		wm.showWindow($("mouse-window"));
 	}
 

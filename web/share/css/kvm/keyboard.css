@@ -26,3 +26,11 @@ div#keyboard-desktop {
 div#keyboard-mobile {
 	display: none;
 }
+
+:root[data-ui="mobile"] div#keyboard-desktop {
+	display: none;
+}
+
+:root[data-ui="mobile"] div#keyboard-mobile {
+	display: block;
+}

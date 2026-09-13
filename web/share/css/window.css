@@ -138,3 +138,42 @@ div.window[data-x-wm-window-centered] div.window-header div.window-buttons butto
 div.window[data-x-wm-window-maximized] div.window-header div.window-buttons button[data-wm-window-set-maximized] {
 	color: var(--cs-window-button-special-fg);
 }
+
+
+/* =========================================================================
+   Layout and capability rules -- see share/js/ui.js for the data-ui switch.
+   ========================================================================= */
+
+/* Window chrome has to be grabbable by a finger. */
+@media (pointer: coarse) {
+	div.window div.window-header,
+	div.window div.window-header div.window-grab {
+		min-height: 35px;
+	}
+
+	div.window div.window-header div.window-buttons button {
+		min-width: 44px;
+		min-height: 40px;
+	}
+}
+
+/* Compact: a floating, draggable, resizable window is a desktop idea. The same
+   windows become sheets docked to the bottom edge. !important is needed because
+   wm.js writes the desktop geometry as an inline style. */
+:root[data-ui="mobile"] div.window:not(.window-full-tab):not(#stream-window) {
+	top: auto !important;
+	bottom: 0 !important;
+	left: 0 !important;
+	width: 100% !important;
+	max-width: 100% !important;
+	border-radius: 12px 12px 0 0;
+	border-bottom: 0;
+	border-left: 0;
+	border-right: 0;
+	resize: none;
+	padding-bottom: calc(9px + env(safe-area-inset-bottom));
+}
+
+:root[data-ui="mobile"] div.window {
+	transform: none !important;
+}

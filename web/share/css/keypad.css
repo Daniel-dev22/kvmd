@@ -167,3 +167,12 @@ div.keypad b {
 div.keypad div.locked b {
 	color: var(--cs-key-locked-bg);
 }
+
+
+/* The keypad is still sized in fixed pixels and scaled as a block; Phase 2
+   replaces both with a viewport-derived key unit. Until then this preserves
+   the previous behaviour under the new layout switch rather than the old
+   user-agent sniff. */
+:root[data-ui="mobile"] div.keypad {
+	zoom: 1.28;
+}

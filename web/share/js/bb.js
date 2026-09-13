@@ -23,9 +23,6 @@
 "use strict";
 
 
-import {ROOT_PREFIX} from "./vars.js";
-
-
 export function getUrlParam(name) {
 	const params = new URLSearchParams(window.location.search);
 	return params.get(name);
@@ -91,8 +88,6 @@ export var browser = new function() {
 
 	let is_android = /android/i.test(navigator.userAgent);
 
-	let ui = window.localStorage.getItem("page.ui.type");
-
 	let flags = {
 		"is_opera": is_opera,
 		"is_firefox": is_firefox,
@@ -105,20 +100,13 @@ export var browser = new function() {
 		"is_ios": is_ios,
 		"is_android": is_android,
 		"is_apple": (is_mac || is_ios),
-		"is_mobile": (
-			ui === "desktop"
-				? false
-				: ui === "mobile"
-					? true
-					: (is_ios || is_android)
-		),
 	};
 
 	console.log("===== BB flags:", flags);
 	return flags;
 };
 
-export function checkBrowser(desktop_css, mobile_css) {
+export function checkBrowser() {
 	if (
 		!window.navigator
 		|| window.navigator.userAgent.indexOf("MSIE ") > 0
@@ -148,29 +136,7 @@ export function checkBrowser(desktop_css, mobile_css) {
 		return false;
 
 	} else {
-		if (browser.is_mobile) {
-			__addCssLink("x-mobile.css");
-			if (mobile_css) {
-				__addCssLink(mobile_css);
-			}
-		} else {
-			__addCssLink("x-desktop.css");
-			if (desktop_css) {
-				__addCssLink(desktop_css);
-			}
-		}
 		return true;
 	}
 }
 
-function __addCssLink(path) {
-	path = `${ROOT_PREFIX}share/css/${path}`;
-	console.log("===== Adding CSS:", path);
-	let el_head = document.getElementsByTagName("head")[0];
-	let el_link = document.createElement("link");
-	el_link.rel = "stylesheet";
-	el_link.type = "text/css";
-	el_link.href = path;
-	el_link.media = "all";
-	el_head.appendChild(el_link);
-}

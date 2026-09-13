@@ -260,3 +260,68 @@ ul.navbar-bg-tips li.right {
 ul.navbar-bg-tips li a {
 	color: var(--cs-page-obscure-fg);
 }
+
+
+/* =========================================================================
+   Layout and capability rules -- see share/js/ui.js for the data-ui switch.
+   ========================================================================= */
+
+@media (hover: hover) {
+	ul#navbar li .menu-action:hover {
+		background-color: var(--cs-navbar-item-hovered-bg);
+	}
+
+	ul#navbar li .menu-button:hover:not(.menu-button-pressed) {
+		background-color: var(--cs-navbar-default-bg);
+	}
+}
+
+/* Compact: the same items in the same order, as one horizontally scrollable
+   strip. Nothing is removed and nothing is hidden behind a hamburger -- the
+   overflow is visible and swipeable. */
+:root[data-ui="mobile"] ul#navbar {
+	display: flex;
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+	-webkit-overflow-scrolling: touch;
+	padding-left: env(safe-area-inset-left);
+	padding-right: env(safe-area-inset-right);
+}
+
+:root[data-ui="mobile"] ul#navbar::-webkit-scrollbar {
+	display: none;
+}
+
+:root[data-ui="mobile"] ul#navbar li {
+	float: none;
+	flex: 0 0 auto;
+}
+
+/* Anchored dropdowns cannot work inside a scrolling container -- they would be
+   clipped by it. In compact the panel leaves the strip entirely and becomes a
+   bounded sheet with its own scroll. */
+:root[data-ui="mobile"] ul#navbar li div.menu {
+	position: fixed;
+	top: auto;
+	left: 0;
+	right: 0 !important;
+	bottom: 0;
+	width: auto;
+	max-width: 100%;
+	max-height: 70dvh;
+	white-space: normal;
+	overflow-y: auto;
+	border-radius: 12px 12px 0 0;
+	border-top: var(--border-intensive-2px);
+	padding-bottom: env(safe-area-inset-bottom);
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu table {
+	width: 100%;
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu td {
+	word-break: break-word;
+}

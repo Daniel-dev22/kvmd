@@ -32,7 +32,7 @@ import {wm, initWindowManager} from "../wm.js";
 export function main() {
 	initWindowManager();
 
-	if (checkBrowser(null, null)) {
+	if (checkBrowser()) {
 		__setAppText();
 		__loadKvmdInfo();
 	}

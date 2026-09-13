@@ -25,6 +25,7 @@
 
 import {ROOT_PREFIX} from "./vars.js";
 import {getUrlParam, browser} from "./bb.js";
+import {setOnClick, setOnDown, setOnUp} from "./events.js";
 
 
 export var tools = new function() {
@@ -152,30 +153,11 @@ export var tools = new function() {
 
 	self.el = new function() {
 		return {
-			"setOnClick": function(el, cb, prevent_default=true) {
-				el.onclick = el.ontouchend = function(ev) {
-					if (prevent_default) {
-						ev.preventDefault();
-					}
-					cb();
-				};
-			},
-			"setOnDown": function(el, cb, prevent_default=true) {
-				el.onmousedown = el.ontouchstart = function(ev) {
-					if (prevent_default) {
-						ev.preventDefault();
-					}
-					cb(ev);
-				};
-			},
-			"setOnUp": function(el, cb, prevent_default=true) {
-				el.onmouseup = el.ontouchend = function(ev) {
-					if (prevent_default) {
-						ev.preventDefault();
-					}
-					cb();
-				};
-			},
+			// Implemented in events.js so the press/release binding -- including
+			// releasing on a cancelled touch -- lives in exactly one place.
+			"setOnClick": setOnClick,
+			"setOnDown": setOnDown,
+			"setOnUp": setOnUp,
 			"setEnabled": function(el, enabled) {
 				if (!enabled && document.activeElement === el) {
 					let el_to_focus = (
@@ -302,7 +284,7 @@ export var tools = new function() {
 				el.add(option);
 			},
 			"addSeparator": function(el, repeat=30) {
-				if (!self.browser.is_mobile) {
+				if (!(self.browser.is_ios || self.browser.is_android)) {
 					self.selector.addComment(el, "\u2500".repeat(repeat));
 				}
 			},

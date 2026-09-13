@@ -26,7 +26,7 @@ div#navbar-stream-info {
 }
 
 div#stream-window {
-	min-width: 400px;
+	min-width: min(400px, 100vw);
 	min-height: 200px;
 }
 
@@ -107,4 +107,24 @@ canvas#stream-canvas {
 	object-fit: contain;
 	display: block;
 	background-color: black;
+}
+
+
+/* =========================================================================
+   Session chrome that differs by layout -- see share/js/ui.js.
+   ========================================================================= */
+
+/* These two live in the mouse window and only make sense in the compact
+   layout, where the navbar strip and the keyboard are toggled rather than
+   always on screen. */
+:root[data-ui="desktop"] button#mouse-window-navbar-button,
+:root[data-ui="desktop"] button#mouse-window-keyboard-button {
+	display: none;
+}
+
+/* In compact the mouse window is the persistent control surface: the navbar
+   is reached from it, so it must not be closable. */
+:root[data-ui="mobile"] button#navbar-show-button,
+:root[data-ui="mobile"] div#mouse-window button[data-wm-window-close] {
+	display: none;
 }

@@ -24,6 +24,7 @@
 
 
 import {tools, $} from "../tools.js";
+import {HOVER_QUERY} from "../ui.js";
 import {wm} from "../wm.js";
 import {clipboard} from "./clipboard.js";
 
@@ -76,7 +77,7 @@ export function Ocr(__getGeometry) {
 	self.setState = function(state) {
 		if (state) {
 			if (state.enabled !== undefined) {
-				__enabled = (state.enabled && !tools.browser.is_mobile);
+				__enabled = (state.enabled && window.matchMedia(HOVER_QUERY).matches);
 				tools.feature.setEnabled($("stream-ocr"), __enabled);
 				$("stream-ocr-led").className = (__enabled ? "led-gray" : "hidden");
 			}

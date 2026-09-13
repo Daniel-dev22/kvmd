@@ -29,7 +29,7 @@ import {wm, initWindowManager} from "../wm.js";
 
 
 export function main() {
-	if (checkBrowser(null, null)) {
+	if (checkBrowser()) {
 		initWindowManager();
 
 		// Radio is a string container

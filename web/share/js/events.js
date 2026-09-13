@@ -19,13 +19,36 @@
 #                                                                            #
 *****************************************************************************/
 
+// The single binding point for "a control was pressed" and "a control was
+// released", for both mouse and touch. Everything that can be pressed in the UI
+// goes through here, so a fix applied here reaches every key, every mouse
+// button and every menu item at once.
+//
+// Deliberately free of DOM lookups: it only assigns handler properties on the
+// element it is given. That keeps it unit-testable without a browser.
 
-/* ===== Misc ===== */
 
-button#mouse-window-navbar-button {
-	display: none !important;
+function __handler(cb, prevent_default) {
+	return function(ev) {
+		if (prevent_default && ev && ev.preventDefault) {
+			ev.preventDefault();
+		}
+		cb(ev);
+	};
 }
 
-button#mouse-window-keyboard-button {
-	display: none !important;
+export function setOnClick(el, cb, prevent_default=true) {
+	el.onclick = el.ontouchend = __handler(() => cb(), prevent_default);
+}
+
+export function setOnDown(el, cb, prevent_default=true) {
+	el.onmousedown = el.ontouchstart = __handler(cb, prevent_default);
+}
+
+export function setOnUp(el, cb, prevent_default=true) {
+	// ontouchcancel is not optional. A touch cancelled by a system gesture, an
+	// incoming call, or the browser claiming the gesture never produces a
+	// touchend -- and without a release the key stays held down on the host we
+	// are administering.
+	el.onmouseup = el.ontouchend = el.ontouchcancel = __handler(() => cb(), prevent_default);
 }

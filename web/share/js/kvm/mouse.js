@@ -24,6 +24,7 @@
 
 
 import {tools, $} from "../tools.js";
+import {HOVER_QUERY} from "../ui.js";
 import {Keypad} from "../keypad.js";
 
 
@@ -84,6 +85,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		$("stream-box").addEventListener("touchstart", __streamTouchStartHandler);
 		$("stream-box").addEventListener("touchmove", __streamTouchMoveHandler);
 		$("stream-box").addEventListener("touchend", __streamTouchEndHandler);
+		// A cancelled touch never produces a touchend. Without this the button
+		// stays pressed on the host after a system gesture or an incoming call.
+		$("stream-box").addEventListener("touchcancel", __streamTouchEndHandler);
 
 		tools.storage.bindSimpleSwitch($("hid-mouse-squash-switch"), "hid.mouse.squash", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-y-switch"), "hid.mouse.reverse_scrolling", false);
@@ -144,7 +148,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		let is_captured;
 		if (__abs) {
 			is_captured = (
-				tools.browser.is_mobile
+				!window.matchMedia(HOVER_QUERY).matches
 				|| $("stream-box").matches("#stream-box:hover")
 			);
 			let dot = $("hid-mouse-dot-switch").checked;

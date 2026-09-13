@@ -21,6 +21,6 @@
 
 
 div#system-menu {
-	min-width: 420px;
-	max-width: 420px;
+	min-width: min(420px, 100vw);
+	max-width: min(420px, 100vw);
 }

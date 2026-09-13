@@ -24,6 +24,7 @@
 
 
 import {tools, $, $$, $$$} from "./tools.js";
+import {UI_MOBILE} from "./ui.js";
 
 
 export var wm;
@@ -174,6 +175,11 @@ function __WindowManager() {
 
 		window.addEventListener("resize", __organizeAllWindows);
 		window.addEventListener("orientationchange", __organizeAllWindows);
+		if (window.visualViewport) {
+			// Fires for the URL bar collapsing and the on-screen keyboard
+			// opening -- neither of which raises a window resize event.
+			window.visualViewport.addEventListener("resize", __organizeAllWindows);
+		}
 	};
 
 	/************************************************************************/
@@ -351,14 +357,24 @@ function __WindowManager() {
 		}
 	};
 
+	var __isCompact = function() {
+		return (document.documentElement.getAttribute("data-ui") === UI_MOBILE);
+	};
+
 	self.getViewGeometry = function() {
 		let el = $("navbar");
 		let hidden = (!el || !tools.hidden.isVisible(el));
+		// visualViewport is the region the user can actually see and touch. It
+		// excludes a phone's dynamic URL bar and shrinks when the on-screen
+		// keyboard opens, whereas window.innerHeight reports the layout
+		// viewport -- which on a phone is regularly taller than the screen, so
+		// windows were being placed under the browser chrome.
+		let vv = window.visualViewport;
 		return {
 			"top": (hidden ? 0 : el.clientHeight), // Navbar height
-			"bottom": Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
+			"bottom": (vv ? vv.height : Math.max(document.documentElement.clientHeight, window.innerHeight || 0)),
 			"left": 0,
-			"right": Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
+			"right": (vv ? vv.width : Math.max(document.documentElement.clientWidth, window.innerWidth || 0)),
 		};
 	};
 
@@ -469,9 +485,14 @@ function __WindowManager() {
 			el_bt.classList.toggle("menu-button-pressed", open);
 
 			if (open) {
-				let rect = el_menu.getBoundingClientRect();
-				let offset = self.getViewGeometry().right - (rect.left + el_menu.offsetWidth);
-				el_menu.style.right = Math.max(0, offset) + "px";
+				if (!__isCompact()) {
+					// Keep an anchored dropdown inside the view. In compact the
+					// menu is a full-width sheet positioned by CSS, and writing
+					// an inline offset here would fight it.
+					let rect = el_menu.getBoundingClientRect();
+					let offset = self.getViewGeometry().right - (rect.left + el_menu.offsetWidth);
+					el_menu.style.right = Math.max(0, offset) + "px";
+				}
 
 				let el_focus = el_menu.querySelector("[data-wm-menu-focus]");
 				(el_focus !== null ? el_focus : el_menu).focus();
@@ -544,6 +565,10 @@ function __WindowManager() {
 			__closeAllMenues();
 			__activateLastWindow();
 		}, 10);
+	};
+
+	self.organizeAllWindows = function() {
+		__organizeAllWindows();
 	};
 
 	var __organizeAllWindows = function() {
