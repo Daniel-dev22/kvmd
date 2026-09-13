@@ -178,7 +178,22 @@ function __WindowManager() {
 		if (window.visualViewport) {
 			// Fires for the URL bar collapsing and the on-screen keyboard
 			// opening -- neither of which raises a window resize event.
-			window.visualViewport.addEventListener("resize", __organizeAllWindows);
+			for (let what of ["resize", "scroll"]) {
+				window.visualViewport.addEventListener(what, function() {
+					__updateKeyboardInset();
+					__organizeAllWindows();
+				});
+			}
+		}
+		__updateKeyboardInset();
+
+		// The docked sheet's height changes without any window being organized --
+		// switching keyboard layer, or the typing bar collapsing the board -- and
+		// measuring during __organizeWindow() catches the layout mid-flight.
+		// Observing the windows keeps the offset true whenever it actually moves.
+		let dock_observer = new ResizeObserver(__updateDockOffset);
+		for (let el_win of $$("window")) {
+			dock_observer.observe(el_win);
 		}
 	};
 
@@ -578,6 +593,19 @@ function __WindowManager() {
 	// bottom of whatever sheet was open -- including the typing bar, so tapping
 	// the typing bar hit the mouse pad instead. The pad now rides above the
 	// open sheet rather than on it.
+	// How much of the layout viewport the system keyboard is covering. On
+	// Android the layout viewport itself shrinks, so this is ~0; on iOS it does
+	// NOT -- only the visual viewport shrinks -- so without this a docked sheet
+	// sits behind the keyboard, invisible and untouchable.
+	var __updateKeyboardInset = function() {
+		let vv = window.visualViewport;
+		let inset = 0;
+		if (vv) {
+			inset = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
+		}
+		document.documentElement.style.setProperty("--wm-kb-inset", `${inset}px`);
+	};
+
 	var __updateDockOffset = function() {
 		let offset = 0;
 		if (__isCompact()) {
@@ -585,11 +613,13 @@ function __WindowManager() {
 				if (el_win.id !== "mouse-window"
 					&& !el_win.classList.contains("window-full-tab")
 					&& tools.hidden.isVisible(el_win)) {
-					offset = Math.max(offset, el_win.offsetHeight);
+					// Fractional: offsetHeight rounds to an integer, which left
+					// the pad a pixel or two INSIDE the sheet below it.
+					offset = Math.max(offset, el_win.getBoundingClientRect().height);
 				}
 			}
 		}
-		document.documentElement.style.setProperty("--wm-dock-offset", `${offset}px`);
+		document.documentElement.style.setProperty("--wm-dock-offset", `${Math.ceil(offset)}px`);
 	};
 
 	var __organizeAllWindows = function() {

@@ -22,6 +22,7 @@
 
 import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
+import {wm} from "../wm.js";
 import {printText} from "./print.js";
 import {diffTyped, makePrintQueue} from "./typing.js";
 
@@ -393,6 +394,7 @@ export function Keyboard(__recordWsEvent) {
 	var __typed = "";
 	var __composing = false;
 	var __printer = null;
+	var __blur_timer = null;
 
 	var __initTyping = function() {
 		let el = $("hid-type-input");
@@ -409,6 +411,29 @@ export function Keyboard(__recordWsEvent) {
 				return ((el_km !== null && el_km.value) ? el_km.value : "en-us");
 			},
 			"onError": (http) => tools.error("Keyboard: typing failed:", http.status, http.responseText),
+		});
+
+		// While the system keyboard is up, the scancode layers are redundant --
+		// Android already has the letters -- and they are eating the screen. Only
+		// what a phone keyboard CANNOT send stays: Esc, the modifiers, Tab and
+		// the arrows. The layer picker stays too, so the full board is one tap
+		// away; tapping it dismisses the system keyboard.
+		el.addEventListener("focus", function() {
+			if (__blur_timer !== null) {
+				clearTimeout(__blur_timer);
+				__blur_timer = null;
+			}
+			document.documentElement.setAttribute("data-typing", "1");
+			wm.organizeAllWindows();
+		});
+		el.addEventListener("blur", function() {
+			// Pressing a key in the strip must not collapse and re-expand the
+			// sheet under the user's finger, so a momentary blur is ignored.
+			__blur_timer = setTimeout(function() {
+				__blur_timer = null;
+				document.documentElement.removeAttribute("data-typing");
+				wm.organizeAllWindows();
+			}, 200);
 		});
 
 		// An IME composes in place and fires input events for partial text.
@@ -477,7 +502,15 @@ export function Keyboard(__recordWsEvent) {
 
 	var __initLayers = function() {
 		for (let el_bt of $$$("[data-keypad-layer-button]")) {
-			tools.el.setOnClick(el_bt, () => __setLayer(el_bt.getAttribute("data-keypad-layer-button")));
+			tools.el.setOnClick(el_bt, function() {
+				// Choosing a layer means you want the scancode board, so let go
+				// of the typing field and put the system keyboard away.
+				let el_type = $("hid-type-input");
+				if (el_type !== null) {
+					el_type.blur();
+				}
+				__setLayer(el_bt.getAttribute("data-keypad-layer-button"));
+			});
 		}
 		__setLayer(tools.storage.get("hid.keyboard.layer", "abc"));
 	};

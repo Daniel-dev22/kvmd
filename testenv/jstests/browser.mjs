@@ -139,6 +139,11 @@ async function newPage(port) {
 
 	await send("Page.enable");
 	await send("Runtime.enable");
+	// Without this, a headless page is never "focused", so .focus() moves
+	// document.activeElement but fires NO focus event -- and any behaviour
+	// hanging off focus silently does nothing in tests while working fine in a
+	// real browser. The instrument has to behave like the thing it stands in for.
+	await send("Emulation.setFocusEmulationEnabled", {"enabled": true});
 
 	return {
 		"setViewport": (width, height, mobile = true) => send("Emulation.setDeviceMetricsOverride", {

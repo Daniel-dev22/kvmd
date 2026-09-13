@@ -214,7 +214,10 @@ div.keypad-layers {
 :root[data-ui="mobile"] div.keypad div.keypad-row {
 	display: grid;
 	grid-template-columns: repeat(20, 1fr);
-	gap: 4px;
+	/* 19 gaps across the row, so every pixel here costs 19 off the keys -- at
+	   4px that was 24% of a 320px screen and left letter keys at 26px against
+	   a native keyboard's ~29px. */
+	gap: 3px;
 	height: auto;
 	margin-bottom: 0;
 	white-space: normal;
@@ -292,4 +295,12 @@ div.keypad-type {
 	color: var(--cs-key-default-fg);
 	background-color: var(--cs-key-default-bg);
 	font-size: 20px;
+}
+
+/* While the system keyboard is up it already provides the letters, digits and
+   punctuation, so the scancode layers are hidden and the screen goes to the
+   host's video instead. What remains is what a phone keyboard cannot send. The
+   layer picker stays, so the full board is one tap away. */
+:root[data-ui="mobile"][data-typing="1"] div#keyboard-compact div[data-keypad-layer] {
+	display: none;
 }

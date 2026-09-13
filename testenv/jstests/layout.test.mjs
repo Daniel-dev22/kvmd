@@ -379,6 +379,82 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.deepEqual(sent, ["hello"], `erasing sent: ${JSON.stringify(sent)}`);
 	});
 
+	// Focus events are the whole mechanism here, and a headless page that is not
+	// "focused" moves activeElement without firing them -- so this would pass
+	// vacuously if the harness ever stopped emulating focus.
+	test("the harness fires real focus events", async () => {
+		const pg = await openKeyboard();
+		const fired = await pg.eval(`(() => {
+			let n = 0;
+			const el = document.getElementById("hid-type-clear");
+			el.addEventListener("focus", () => n++);
+			el.focus();
+			return n;
+		})()`);
+		await pg.close();
+		assert.equal(fired, 1, "focus() did not fire a focus event -- focus-driven behaviour is untested");
+	});
+
+	test("typing collapses the scancode board but keeps what a phone cannot send", async () => {
+		const pg = await openKeyboard();
+		const before = await pg.eval(`(() => {
+			const vis = (s) => [...document.querySelectorAll(s)].filter((e) => e.getBoundingClientRect().height > 0).length;
+			return {rows: vis("#keyboard-compact [data-keypad-layer]"),
+				h: Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height)};
+		})()`);
+		await pg.eval(`document.getElementById("hid-type-input").focus()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 150))");
+		const during = await pg.eval(`(() => {
+			const vis = (s) => [...document.querySelectorAll(s)].filter((e) => e.getBoundingClientRect().height > 0).length;
+			return {typing: document.documentElement.getAttribute("data-typing"),
+				rows: vis("#keyboard-compact [data-keypad-layer]"),
+				strip: vis("#keyboard-compact [data-keypad-persistent] .key"),
+				bar: vis("#hid-type-input"),
+				picker: vis("#keyboard-layers button"),
+				h: Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height)};
+		})()`);
+		await pg.close();
+		assert.ok(before.rows > 0, "the board was not showing to begin with");
+		assert.equal(during.typing, "1", "typing mode never engaged");
+		assert.equal(during.rows, 0, "the scancode layers are still on screen while the system keyboard is up");
+		assert.ok(during.strip >= 10, `only ${during.strip} strip keys remain -- arrows and modifiers must stay`);
+		assert.equal(during.bar, 1, "the typing bar disappeared");
+		assert.ok(during.picker > 0, "the layer picker must stay, so the board is one tap away");
+		assert.ok(during.h < before.h,
+			`the sheet did not shrink (${before.h}px -> ${during.h}px); the space should go back to the video`);
+	});
+
+	test("choosing a layer leaves typing mode and shows that layer", async () => {
+		const pg = await openKeyboard();
+		await pg.eval(`document.getElementById("hid-type-input").focus()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 150))");
+		await pg.eval(`document.querySelector('[data-keypad-layer-button="fn"]').click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		const after = await pg.eval(`(() => {
+			const vis = (s) => [...document.querySelectorAll(s)].filter((e) => e.getBoundingClientRect().height > 0).length;
+			return {typing: document.documentElement.getAttribute("data-typing"),
+				fnRows: vis('#keyboard-compact [data-keypad-layer="fn"]')};
+		})()`);
+		await pg.close();
+		assert.equal(after.typing, null, "tapping a layer must release the typing field");
+		assert.ok(after.fnRows > 0, "the chosen layer did not appear");
+	});
+
+	test("docked sheets are positioned clear of the system keyboard", async () => {
+		// On iOS the layout viewport does not shrink when the keyboard opens --
+		// only the visual viewport does -- so bottom:0 puts a sheet behind it.
+		const pg = await openKeyboard();
+		const m = await pg.eval(`(() => {
+			const root = getComputedStyle(document.documentElement);
+			const kw = getComputedStyle(document.getElementById("keyboard-window"));
+			return {inset: root.getPropertyValue("--wm-kb-inset").trim(), bottom: kw.bottom};
+		})()`);
+		await pg.close();
+		assert.notEqual(m.inset, "", "wm.js must publish the system keyboard inset");
+		assert.equal(m.inset, "0px", "no system keyboard is open in the harness, so the inset is zero");
+		assert.equal(m.bottom, "0px", "with no keyboard open the sheet sits on the bottom edge");
+	});
+
 	test("the keyboard can be dismissed on a phone", async () => {
 		// kvm/x-mobile.css used to hide the window header outright, so the
 		// keyboard could be neither moved nor closed once it was up.

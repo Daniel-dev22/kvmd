@@ -162,7 +162,9 @@ div.window[data-x-wm-window-maximized] div.window-header div.window-buttons butt
    wm.js writes the desktop geometry as an inline style. */
 :root[data-ui="mobile"] div.window:not(.window-full-tab):not(#stream-window) {
 	top: auto !important;
-	bottom: 0 !important;
+	/* Above the system keyboard, which on iOS does not shrink the layout
+	   viewport -- so bottom: 0 would put this behind it. */
+	bottom: var(--wm-kb-inset, 0px) !important;
 	left: 0 !important;
 	width: 100% !important;
 	max-width: 100% !important;
@@ -183,5 +185,5 @@ div.window[data-x-wm-window-maximized] div.window-header div.window-buttons butt
    sheet instead; wm.js keeps --wm-dock-offset equal to the open sheet's
    height, and it is 0 when nothing else is docked. */
 :root[data-ui="mobile"] div.window#mouse-window:not(.window-full-tab) {
-	bottom: var(--wm-dock-offset, 0px) !important;
+	bottom: calc(var(--wm-kb-inset, 0px) + var(--wm-dock-offset, 0px)) !important;
 }
