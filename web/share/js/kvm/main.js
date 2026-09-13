@@ -83,9 +83,10 @@ export function main() {
 	}
 
 	wm.showWindow($("stream-window"));
-	if (ui.current() === UI_MOBILE) {
-		wm.showWindow($("mouse-window"));
-	}
+	// The mouse pad used to be opened here on every phone load. Together with
+	// the keyboard sheet and the system keyboard it left no video at all, and
+	// most of the time it is not what the session is for. It is one tap away
+	// from the Keyboard window's header and from System -> Mouse.
 
 	new Session();
 }

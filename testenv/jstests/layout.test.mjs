@@ -269,6 +269,58 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 			`layers on screen at once: ${[...new Set(visible)].join(", ")}`);
 	});
 
+	test("the mouse pad is not on screen until it is asked for", async () => {
+		// It used to be opened on every phone load. With the keyboard sheet and
+		// the system keyboard up as well there was no video left at all.
+		const pg = await open("web/kvm/index.html", 390);
+		const m = await pg.eval(`(() => {
+			const pad = document.getElementById("mouse-window");
+			return {visible: pad.getBoundingClientRect().height > 0,
+				reachable: !!document.querySelector('#keyboard-window-header [data-wm-window-show="mouse-window"]')};
+		})()`);
+		await pg.close();
+		assert.equal(m.visible, false, "the mouse pad is open before anyone asked for it");
+		assert.equal(m.reachable, true,
+			"nothing opens the mouse pad from the keyboard header -- hiding it by default would strand it");
+	});
+
+	test("the keyboard header opens the mouse pad", async () => {
+		const pg = await open("web/kvm/index.html", 390);
+		const shown = await pg.eval(`(() => {
+			document.querySelector('[data-wm-window-show="keyboard-window"]').click();
+			document.querySelector('#keyboard-window-header [data-wm-window-show="mouse-window"]').click();
+			return document.getElementById("mouse-window").getBoundingClientRect().height > 0;
+		})()`);
+		await pg.close();
+		assert.equal(shown, true, "the mouse toggle in the keyboard header did not open the pad");
+	});
+
+	test("a sheet taller than the screen scrolls instead of running off the top", async () => {
+		// A docked sheet grows UPWARDS from the bottom edge, so on a short phone
+		// the full board ran past the navbar with div.window's `overflow: hidden`
+		// swallowing it -- the top rows could not be reached at all.
+		// 360px tall: short enough that the board genuinely cannot fit, which is
+		// what makes the height cap bind. At 480 the sheet fits either way and
+		// removing the cap changes nothing observable.
+		const pg = await open("web/kvm/index.html", 320, 360);
+		const m = await pg.eval(`(() => {
+			document.querySelector('[data-wm-window-show="keyboard-window"]').click();
+			document.querySelector('[data-keypad-layer-button="abc"]').click();
+			const win = document.getElementById("keyboard-window");
+			const b = win.getBoundingClientRect();
+			return {top: Math.round(b.top), overflowY: getComputedStyle(win).overflowY,
+				scrollable: win.scrollHeight > win.clientHeight + 1,
+				reachable: win.scrollHeight - win.clientHeight};
+		})()`);
+		await pg.close();
+		assert.equal(m.overflowY, "auto", "the compact sheet cannot scroll, so anything past the screen is lost");
+		assert.ok(m.scrollable,
+			"precondition: the board must not fit this viewport, or the height cap is not under test");
+		assert.ok(m.top >= 50,
+			`the sheet starts at y=${m.top} -- it has run up past the navbar, where those rows cannot be reached`);
+		assert.ok(m.reachable > 0, "the sheet reports overflow but nothing can be scrolled to");
+	});
+
 	test("the desktop board is not rendered in the compact layout", async () => {
 		const pg = await openKeyboard();
 		const h = await pg.eval(`(() => {

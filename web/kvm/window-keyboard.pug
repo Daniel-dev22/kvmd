@@ -204,6 +204,11 @@ mixin ck_row(layer)
 	.window-header#keyboard-window-header
 		.window-grab Keyboard
 		.window-buttons
+			//- The mouse pad is not on screen unless it is asked for, so the
+			//- way back to it lives here -- the mirror of the keyboard button
+			//- the mouse pad's own header carries.
+			button#keyboard-window-mouse-button(data-wm-window-show="mouse-window")
+				img.led-gray(src=`${svg_dir}/led-hid-mouse.svg`)
 			button(data-wm-window-set-original)
 			button(data-wm-window-close)
 

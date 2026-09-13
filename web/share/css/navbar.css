@@ -434,6 +434,22 @@ ul.navbar-bg-tips li a {
 	height: 18px;
 }
 
+/* The labels and the status LEDs are both sized for a desktop. Trimming them
+   is what buys the remaining items their place: System alone carries four LEDs
+   and was the widest item on the strip at 209px. Nothing is dropped -- every
+   label and every LED is still there, which is the point: a bare icon strip
+   would be ambiguous (ATX and Switch carry the SAME two LEDs, and Shortcuts
+   and GPIO have no icon at all). */
+:root[data-ui="mobile"] ul#navbar li .menu-item {
+	font-size: 13px;
+	/* Trimming the label must not trim the target: "Text" came out 43px wide. */
+	min-width: 44px;
+	justify-content: center;
+}
+:root[data-ui="mobile"] ul#navbar li .menu-item img {
+	height: 16px;
+}
+
 /* Anchored dropdowns cannot work inside a scrolling container -- they would be
    clipped by it. In compact the panel leaves the strip entirely and becomes a
    bounded sheet with its own scroll. */

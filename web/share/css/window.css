@@ -174,6 +174,13 @@ div.window[data-x-wm-window-maximized] div.window-header div.window-buttons butt
 	border-right: 0;
 	resize: none;
 	padding-bottom: calc(9px + env(safe-area-inset-bottom));
+	/* A docked sheet grows upwards from the bottom edge, so anything taller
+	   than the screen ran off the TOP -- past the navbar, unreachable, with
+	   `overflow: hidden` on div.window swallowing it. The full scancode board
+	   on a short phone is exactly that. It scrolls inside itself instead. */
+	max-height: calc(100dvh - var(--wm-kb-inset, 0px) - 55px);
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 
 :root[data-ui="mobile"] div.window {
