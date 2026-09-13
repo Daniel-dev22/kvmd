@@ -303,6 +303,11 @@ ul.navbar-bg-tips li a {
    clipped by it. In compact the panel leaves the strip entirely and becomes a
    bounded sheet with its own scroll. */
 :root[data-ui="mobile"] ul#navbar li div.menu {
+	/* content-box plus a 2px border makes a full-width sheet 4px wider than the
+	   viewport, which is enough to push the page sideways. */
+	box-sizing: border-box;
+	border-left: 0;
+	border-right: 0;
 	position: fixed;
 	top: auto;
 	left: 0;

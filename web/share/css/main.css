@@ -55,6 +55,8 @@ p:last-child.text {
 }
 
 div.code {
+	/* A long command must scroll in its own box, never widen the page. */
+	overflow-x: auto;
 	white-space: nowrap;
 	overflow-x: auto;
 	font-family: monospace;

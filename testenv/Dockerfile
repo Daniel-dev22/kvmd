@@ -82,6 +82,7 @@ RUN \
 		socat \
 		eslint \
 		npm \
+		chromium \
 		shellcheck \
 	&& :
 
