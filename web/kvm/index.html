@@ -1315,6 +1315,10 @@
     </ul>
     <div class="hidden window" id="stream-ocr-window">
       <div class="hidden" id="stream-ocr-selection"></div>
+      <div id="stream-ocr-controls">
+        <button id="stream-ocr-confirm-button" disabled>&bull; Recognize</button>
+        <button id="stream-ocr-cancel-button">&bull; Cancel</button>
+      </div>
     </div>
     <div class="hidden window window-elegant window-resizable" id="stream-window" data-wm-window-show-maximized data-wm-organize-hook>
       <div class="window-header" id="stream-window-header">
@@ -1640,7 +1644,7 @@
                 </div>
           </div>
           <div class="keypad-row">
-                <div class="key wide-3 left small" data-keypad-code="ShiftLeft" data-keypad-allow-autohold>
+                <div class="key wide-3 left small" data-keypad-code="ShiftLeft" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Shift
                       </div>
                 </div>
@@ -1695,23 +1699,23 @@
                       </div>
                 </div>
                     <div class="spacer"></div>
-                <div class="key wide-3 right small" data-keypad-code="ShiftRight" data-keypad-allow-autohold>
+                <div class="key wide-3 right small" data-keypad-code="ShiftRight" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Shift
                       </div>
                 </div>
           </div>
           <div class="keypad-row">
-                <div class="key wide-1 left small" data-keypad-code="ControlLeft" data-keypad-allow-autohold>
+                <div class="key wide-1 left small" data-keypad-code="ControlLeft" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Ctrl
                       </div>
                 </div>
                     <div class="spacer-fixed"></div>
-                <div class="key wide-1 left small" data-keypad-code="MetaLeft" data-keypad-allow-autohold>
+                <div class="key wide-1 left small" data-keypad-code="MetaLeft" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Win
                       </div>
                 </div>
                     <div class="spacer-fixed"></div>
-                <div class="key wide-1 left small" data-keypad-code="AltLeft" data-keypad-allow-autohold>
+                <div class="key wide-1 left small" data-keypad-code="AltLeft" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Alt
                       </div>
                 </div>
@@ -1721,12 +1725,12 @@
                       </div>
                 </div>
                     <div class="spacer-fixed"></div>
-                <div class="key wide-1 right small" data-keypad-code="AltRight" data-keypad-allow-autohold>
+                <div class="key wide-1 right small" data-keypad-code="AltRight" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Alt
                       </div>
                 </div>
                     <div class="spacer-fixed"></div>
-                <div class="key wide-1 right small" data-keypad-code="MetaRight" data-keypad-allow-autohold>
+                <div class="key wide-1 right small" data-keypad-code="MetaRight" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Win
                       </div>
                 </div>
@@ -1736,7 +1740,7 @@
                       </div>
                 </div>
                     <div class="spacer-fixed"></div>
-                <div class="key wide-1 right small" data-keypad-code="ControlRight" data-keypad-allow-autohold>
+                <div class="key wide-1 right small" data-keypad-code="ControlRight" data-keypad-allow-autohold data-keypad-modifier>
                       <div class="label"><b>&bull;</b><br>Ctrl
                       </div>
                 </div>
@@ -2213,15 +2217,15 @@
                         <div class="label"><br>Menu
                         </div>
                   </div>
-                  <div class="key" data-keypad-code="ShiftRight" data-keypad-allow-autohold style="--kc: 4">
+                  <div class="key" data-keypad-code="ShiftRight" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
                         <div class="label"><b>&bull;</b><br>Shift
                         </div>
                   </div>
-                  <div class="key" data-keypad-code="MetaRight" data-keypad-allow-autohold style="--kc: 4">
+                  <div class="key" data-keypad-code="MetaRight" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
                         <div class="label"><b>&bull;</b><br>Win
                         </div>
                   </div>
-                  <div class="key" data-keypad-code="AltRight" data-keypad-allow-autohold style="--kc: 4">
+                  <div class="key" data-keypad-code="AltRight" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
                         <div class="label"><b>&bull;</b><br>Alt
                         </div>
                   </div>
@@ -2428,7 +2432,7 @@
                         <div class="label"><b>&bull;</b><br>Cnv
                         </div>
                   </div>
-                  <div class="key" data-keypad-code="ControlRight" data-keypad-allow-autohold style="--kc: 4">
+                  <div class="key" data-keypad-code="ControlRight" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
                         <div class="label"><b>&bull;</b><br>Ctrl
                         </div>
                   </div>
@@ -2443,19 +2447,19 @@
                     <div class="label">&#8676;<br>&#8677;
                     </div>
               </div>
-              <div class="key" data-keypad-code="ControlLeft" data-keypad-allow-autohold style="--kc: 3">
+              <div class="key" data-keypad-code="ControlLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 3">
                     <div class="label"><b>&bull;</b><br>Ctrl
                     </div>
               </div>
-              <div class="key" data-keypad-code="AltLeft" data-keypad-allow-autohold style="--kc: 3">
+              <div class="key" data-keypad-code="AltLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 3">
                     <div class="label"><b>&bull;</b><br>Alt
                     </div>
               </div>
-              <div class="key" data-keypad-code="MetaLeft" data-keypad-allow-autohold style="--kc: 4">
+              <div class="key" data-keypad-code="MetaLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
                     <div class="label"><b>&bull;</b><br>Win
                     </div>
               </div>
-              <div class="key" data-keypad-code="ShiftLeft" data-keypad-allow-autohold style="--kc: 4">
+              <div class="key" data-keypad-code="ShiftLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
                     <div class="label"><b>&bull;</b><br>Shift
                     </div>
               </div>

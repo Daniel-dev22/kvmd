@@ -24,7 +24,6 @@
 
 
 import {tools, $} from "../tools.js";
-import {HOVER_QUERY} from "../ui.js";
 import {wm} from "../wm.js";
 import {clipboard} from "./clipboard.js";
 
@@ -58,18 +57,26 @@ export function Ocr(__getGeometry) {
 		$("stream-ocr-window").onkeyup = function(ev) {
 			ev.preventDefault();
 			if (ev.code === "Enter") {
-				if (__sel) {
-					__recognizeSelection();
-					wm.closeWindow($("stream-ocr-window"));
-				}
+				__confirmSelection();
 			} else if (ev.code === "Escape") {
 				wm.closeWindow($("stream-ocr-window"));
 			}
 		};
 
-		$("stream-ocr-window").onmousedown = __startSelection;
-		$("stream-ocr-window").onmousemove = __changeSelection;
-		$("stream-ocr-window").onmouseup = __endSelection;
+		// Enter and Escape are the whole interface to this overlay, and a phone
+		// has neither. The two buttons are the same two actions, reachable --
+		// and they are shown to everybody rather than gated on a media query,
+		// because "has a keyboard" is not something the page can ask.
+		tools.el.setOnClick($("stream-ocr-confirm-button"), __confirmSelection);
+		tools.el.setOnClick($("stream-ocr-cancel-button"), () => wm.closeWindow($("stream-ocr-window")));
+
+		// A box drawn by a finger is the same box drawn by a mouse.
+		tools.el.setOnDrag($("stream-ocr-window"), {
+			"onStart": __startSelection,
+			"onMove": __changeSelection,
+			"onEnd": __endSelection,
+			"onCancel": __resetSelection,
+		});
 	};
 
 	/************************************************************************/
@@ -77,7 +84,11 @@ export function Ocr(__getGeometry) {
 	self.setState = function(state) {
 		if (state) {
 			if (state.enabled !== undefined) {
-				__enabled = (state.enabled && window.matchMedia(HOVER_QUERY).matches);
+				// Not gated on (hover: hover) any more. Selection was bound to
+				// the mouse only, so the whole feature used to be switched off
+				// wherever there was no pointer -- a capability silently absent
+				// on a phone rather than adapted to it.
+				__enabled = state.enabled;
 				tools.feature.setEnabled($("stream-ocr"), __enabled);
 				$("stream-ocr-led").className = (__enabled ? "led-gray" : "hidden");
 			}
@@ -100,17 +111,27 @@ export function Ocr(__getGeometry) {
 		el.value = tools.storage.get("stream.ocr.lang", langs["default"]);
 	};
 
-	var __startSelection = function(ev) {
+	// The buttons sit on top of the drawing surface, so a tap on one must not
+	// also start a box behind it.
+	var __isControl = function(target) {
+		return $("stream-ocr-controls").contains(target);
+	};
+
+	var __startSelection = function(point, ev) {
+		if (__isControl(ev.target)) {
+			return;
+		}
 		if (__start_pos === null) {
 			tools.hidden.setVisible($("stream-ocr-selection"), false);
-			__start_pos = __getGlobalPosition(ev);
+			__setSelection(null);
+			__start_pos = __getGlobalPosition(point);
 			__end_pos = null;
 		}
 	};
 
-	var __changeSelection = function(ev) {
+	var __changeSelection = function(point) {
 		if (__start_pos !== null) {
-			__end_pos = __getGlobalPosition(ev);
+			__end_pos = __getGlobalPosition(point);
 			let width = Math.abs(__start_pos.x - __end_pos.x);
 			let height = Math.abs(__start_pos.y - __end_pos.y);
 			let el = $("stream-ocr-selection");
@@ -122,8 +143,11 @@ export function Ocr(__getGeometry) {
 		}
 	};
 
-	var __endSelection = function(ev) {
-		__changeSelection(ev);
+	var __endSelection = function(point, ev) {
+		if (__start_pos === null || __isControl(ev.target)) {
+			return;
+		}
+		__changeSelection(point);
 		let el = $("stream-ocr-selection");
 		let ok = (
 			el.offsetWidth > 1 && el.offsetHeight > 1
@@ -138,26 +162,40 @@ export function Ocr(__getGeometry) {
 			let rel_top = Math.min(__start_pos.y, __end_pos.y) - rect.top + offset;
 			let rel_bottom = Math.max(__start_pos.y, __end_pos.y) - rect.top + offset;
 			let geo = __getGeometry();
-			__sel = {
+			__setSelection({
 				"left": tools.remap(rel_left - geo.x, 0, geo.width, 0, geo.real_width),
 				"right": tools.remap(rel_right - geo.x, 0, geo.width, 0, geo.real_width),
 				"top": tools.remap(rel_top - geo.y, 0, geo.height, 0, geo.real_height),
 				"bottom": tools.remap(rel_bottom - geo.y, 0, geo.height, 0, geo.real_height),
-			};
+			});
 		} else {
-			__sel = null;
+			__setSelection(null);
 		}
 		__start_pos = null;
 		__end_pos = null;
 	};
 
-	var __getGlobalPosition = function(ev) {
+	// One place decides both what will be recognized and whether the button
+	// that recognizes it can be pressed, so the two cannot disagree.
+	var __setSelection = function(sel) {
+		__sel = sel;
+		tools.el.setEnabled($("stream-ocr-confirm-button"), (sel !== null));
+	};
+
+	var __confirmSelection = function() {
+		if (__sel) {
+			__recognizeSelection();
+			wm.closeWindow($("stream-ocr-window"));
+		}
+	};
+
+	var __getGlobalPosition = function(point) {
 		let rect = $("stream-box").getBoundingClientRect();
 		let geo = __getGeometry();
 		let offset = __getNavbarOffset();
 		return {
-			"x": Math.min(Math.max(ev.clientX, rect.left + geo.x), rect.right - geo.x),
-			"y": Math.min(Math.max(ev.clientY - offset, rect.top + geo.y - offset), rect.bottom - geo.y - offset),
+			"x": Math.min(Math.max(point.x, rect.left + geo.x), rect.right - geo.x),
+			"y": Math.min(Math.max(point.y - offset, rect.top + geo.y - offset), rect.bottom - geo.y - offset),
 		};
 	};
 
@@ -173,7 +211,7 @@ export function Ocr(__getGeometry) {
 		tools.hidden.setVisible($("stream-ocr-selection"), false);
 		__start_pos = null;
 		__end_pos = null;
-		__sel = null;
+		__setSelection(null);
 	};
 
 	var __recognizeSelection = function() {

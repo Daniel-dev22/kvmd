@@ -25,7 +25,7 @@
 
 import {tools, $} from "../tools.js";
 import {checkBrowser} from "../bb.js";
-import {COMPACT_QUERY, UI_MOBILE, createUiSwitch} from "../ui.js";
+import {COMPACT_QUERY, createUiSwitch} from "../ui.js";
 import {wm, initWindowManager} from "../wm.js";
 
 import {Session} from "./session.js";

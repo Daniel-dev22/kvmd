@@ -15,6 +15,12 @@
 //- ===========================================================================
 
 -
+	//- "mod":  a modifier. It does nothing pressed on its own, so a TAP latches
+	//-         it -- a finger has no right button to hold it with.
+	//- "hold": not a modifier, but may still be held or locked: PrintScreen for
+	//-         SysRq, and the Japanese mode keys. A tap SENDS one of these; a
+	//-         long press holds it. Both kinds render the latch bullet and both
+	//-         take data-keypad-allow-autohold.
 	var KB_KEYS = {
 		"Escape": {"t": "Esc"},
 		"F1": {"t": "F1"},
@@ -90,7 +96,7 @@
 		"MetaRight": {"t": "Win", "mod": true},
 		"ContextMenu": {"t": "<br>Menu"},
 		"ControlRight": {"t": "Ctrl", "mod": true},
-		"PrintScreen": {"t": "Pt/Sq", "mod": true},
+		"PrintScreen": {"t": "Pt/Sq", "hold": true},
 		"ScrollLock": {"t": "<br> ScrLk", "lamp": "hid-keyboard-scroll-led"},
 		"Pause": {"t": "P/Brk"},
 		"Insert": {"t": "Ins"},
@@ -124,9 +130,9 @@
 		"IntlBackslash": {"t": "&bsol;<br>|"},
 		"IntlYen": {"t": "¥<br>_"},
 		"IntlRo": {"t": "&bsol;<br>ろ"},
-		"KanaMode": {"t": "Kana", "mod": true},
-		"NonConvert": {"t": "N/Cnv", "mod": true},
-		"Convert": {"t": "Cnv", "mod": true},
+		"KanaMode": {"t": "Kana", "hold": true},
+		"NonConvert": {"t": "N/Cnv", "hold": true},
+		"Convert": {"t": "Cnv", "hold": true},
 	};
 
 	// Which compact layer each group of keys belongs to. Desktop shows
@@ -147,7 +153,7 @@ mixin kb_label(code)
 	.label
 		if k.lamp
 			img(class=`inline-lamp-small ${k.lamp} led-gray` src=`${svg_dir}/led-square.svg`)
-		if k.mod
+		if k.mod || k.hold
 			b &bull;
 			br
 		!= k.t
@@ -165,7 +171,8 @@ mixin dk(code, sp, classes, width)
 	- var k = KB_KEYS[code]
 	div(
 		data-keypad-code=code
-		data-keypad-allow-autohold=(k.mod ? true : false)
+		data-keypad-allow-autohold=(k.mod || k.hold ? true : false)
+		data-keypad-modifier=(k.mod ? true : false)
 		class=`key ${classes || ""}`
 		style=(width ? `width: ${width}px` : "")
 	)
@@ -185,7 +192,8 @@ mixin ck(code, span)
 	- var k = KB_KEYS[code]
 	div(
 		data-keypad-code=code
-		data-keypad-allow-autohold=(k.mod ? true : false)
+		data-keypad-allow-autohold=(k.mod || k.hold ? true : false)
+		data-keypad-modifier=(k.mod ? true : false)
 		class="key"
 		style=`--kc: ${span}`
 	)

@@ -95,7 +95,11 @@ div.keypad div.pressed {
 	background-color: var(--cs-key-pressed-bg);
 }
 
-div.keypad div.pressed:not(div.holded):not(div.locked):hover[data-keypad-allow-autohold] {
+/* "About to latch." keypad.js puts .holding on a key exactly while its 500ms
+   promotion is armed, so this needs no :hover -- which a finger can never
+   satisfy, and which is why the latch used to arrive on a phone with no
+   warning at all. */
+div.keypad div.pressed.holding[data-keypad-allow-autohold] {
 	/* :active is not working on Firefox and iOS */
 	background: linear-gradient(to top, var(--cs-key-holded-bg) 50%, var(--cs-key-pressed-bg) 0);
 	background-size: 100% 200%;

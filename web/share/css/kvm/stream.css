@@ -44,6 +44,24 @@ div#stream-ocr-window {
 	padding: 0px !important;
 	background: radial-gradient(transparent 15%, black);
 }
+/* Out of flow, so the selection box above -- which is in flow, and sized by
+   javascript -- cannot push the controls off the bottom of the overlay. */
+div#stream-ocr-controls {
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+	display: flex;
+	gap: 10px;
+	cursor: default;
+}
+div#stream-ocr-controls button {
+	/* A finger, not a pointer: the desktop button height is 30px. */
+	min-height: 44px;
+	min-width: 44px;
+	padding: 0 16px;
+}
+
 div#stream-ocr-selection {
 	position: relative;
 	background-color: #5b90bb50;

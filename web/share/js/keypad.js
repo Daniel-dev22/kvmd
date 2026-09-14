@@ -38,8 +38,10 @@ export function Keypad(__el_keypad, __sendKey) {
 		__el_keypad.addEventListener("contextmenu", (ev) => ev.preventDefault());
 
 		for (let el_key of [].slice.call(__el_keypad.getElementsByClassName("key"))) {
-			if (el_key.hasAttribute("data-keypad-allow-autohold")) {
-				el_key.title = "Long left click or short right click for hold, middle for lock";
+			if (el_key.hasAttribute("data-keypad-modifier")) {
+				el_key.title = "Tap to hold, again to lock, again to release; long left click or short right click for hold, middle for lock";
+			} else if (el_key.hasAttribute("data-keypad-allow-autohold")) {
+				el_key.title = "Long left click or short right click for hold, middle for lock; tap a held key to lock it";
 			} else {
 				el_key.title = "Right click for hold, middle for lock";
 			}
@@ -105,6 +107,8 @@ export function Keypad(__el_keypad, __sendKey) {
 				} else if (ev.button === 2) {
 					act = "holded";
 				}
+			} else if (state && __touchLatchHandler(el_key)) {
+				return;
 			}
 		}
 
@@ -113,7 +117,11 @@ export function Keypad(__el_keypad, __sendKey) {
 			__deactivate(el_key);
 			__activate(el_key, act);
 			__process(el_key, true);
-			__startHoldTimer(el_key);
+			// Only a momentary press has anything to be promoted TO. A right or
+			// middle click already chose the fixed state, and arming the timer
+			// over it meant that holding the middle button for half a second
+			// quietly turned a lock back into a hold.
+			__startHoldTimer(el_key, (act === "pressed"));
 		} else {
 			let fixed = (__isActive(el_key, "holded") || __isActive(el_key, "locked"));
 			if (!state && fixed && __stopHoldTimer(el_key)) {
@@ -130,15 +138,62 @@ export function Keypad(__el_keypad, __sendKey) {
 		}
 	};
 
-	var __startHoldTimer = function(el_key) {
+	// A finger has no middle or right button, so the two fixed states a mouse
+	// reaches with them are reached by tapping instead. One rule covers every
+	// key: a tap ADVANCES a key that is already latched -- hold, then lock,
+	// then off -- and a tap on an idle MODIFIER latches it, because a modifier
+	// pressed on its own does nothing at all. Every other key keeps its
+	// momentary tap, which is why PrintScreen and the Japanese mode keys carry
+	// "hold" rather than "mod" in window-keyboard.pug: they can be held by a
+	// long press, but tapping one has to send it.
+	//
+	// Returns true when the tap was consumed here.
+	var __touchLatchHandler = function(el_key) {
+		if (__isActive(el_key, "locked")) {
+			// Clearing a latch lives in exactly one place -- the release path
+			// below, which already does it for a mouse.
+			return false;
+		}
+		let held = __isActive(el_key, "holded");
+		if (!held && !el_key.hasAttribute("data-keypad-modifier")) {
+			return false;
+		}
+		let down = __isActive(el_key);
+		__stopHoldTimer(el_key);
+		__deactivate(el_key);
+		__activate(el_key, (held ? "locked" : "holded"));
+		if (!down) {
+			__process(el_key, true);
+		}
+		// Marks the press, so the release of THIS tap is ignored: the key has
+		// just latched and must not be dropped by the finger lifting. The
+		// promotion is off -- the state was chosen here, not by a timer.
+		__startHoldTimer(el_key, false);
+		return true;
+	};
+
+	var __startHoldTimer = function(el_key, autohold=true) {
 		__stopHoldTimer(el_key);
 		let code = el_key.getAttribute("data-keypad-code");
+		// "This key will latch in 500ms" used to be drawn by a :hover-gated
+		// animation, which a finger can never satisfy -- so on a phone the
+		// latch arrived with no warning at all. The state is marked here
+		// instead, where it is actually known: the class is on the key exactly
+		// while the promotion is armed, so the animation cannot claim a latch
+		// that is not coming (a modifier held on a PHYSICAL keyboard reaches
+		// emit(), which arms nothing).
+		if (autohold && el_key.hasAttribute("data-keypad-allow-autohold")) {
+			__setHolding(el_key, true);
+		}
 		__hold_timers[code] = setTimeout(function() {
 			// Помимо прямой функции, hold timer используется для детектирования факта
 			// нажатия в рамках одной сессии press/release, чтобы не отпустить сразу же
 			// зажатую или заблокированную клавишу. Поэтому таймер инициализируется всегда,
 			// но основную функцию выполняет только если у него есть атрибут data-keypad-allow-autohold.
-			if (el_key.hasAttribute("data-keypad-allow-autohold")) {
+			// autohold is false when a tap has already chosen the state (see
+			// __touchLatchHandler); the timer then only marks the press, so
+			// the finger lifting does not drop the key it just latched.
+			if (autohold && el_key.hasAttribute("data-keypad-allow-autohold")) {
 				__deactivate(el_key);
 				__activate(el_key, "holded");
 			}
@@ -146,6 +201,7 @@ export function Keypad(__el_keypad, __sendKey) {
 	};
 
 	var __stopHoldTimer = function(el_key) {
+		__setHolding(el_key, false);
 		let code = el_key.getAttribute("data-keypad-code");
 		if (!__hold_timers[code]) {
 			return false;
@@ -196,6 +252,15 @@ export function Keypad(__el_keypad, __sendKey) {
 			el_key.classList.remove("pressed");
 			el_key.classList.remove("holded");
 			el_key.classList.remove("locked");
+			el_key.classList.remove("holding");
+		}
+	};
+
+	// Mirrored across every element carrying the code, exactly like the state
+	// classes -- the compact and desktop boards show the same key.
+	var __setHolding = function(el_key, on) {
+		for (let el of __resolveKeys(el_key)) {
+			el.classList.toggle("holding", on);
 		}
 	};
 

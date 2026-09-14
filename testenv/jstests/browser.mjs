@@ -165,6 +165,21 @@ async function newPage(port) {
 			// Give the module scripts their turn; they are deferred by spec.
 			await new Promise((done) => setTimeout(done, 350));
 		},
+		// Touch has to be turned on explicitly: device metrics alone do not give
+		// the page a touchscreen, and the media queries that decide the layout
+		// (pointer: coarse, hover: none) answer differently once it does. Call
+		// it BEFORE navigating, or the page bootstraps against the wrong answer.
+		"setTouch": (enabled = true, points = 5) => send("Emulation.setTouchEmulationEnabled", {
+			enabled, "maxTouchPoints": points,
+		}),
+		// A real touch, routed and hit-tested by the engine -- not a synthetic
+		// TouchEvent handed straight to a listener, which would prove only that
+		// the listener exists. `points` is every finger still down; touchEnd
+		// and touchCancel take none.
+		"touch": (type, points = []) => send("Input.dispatchTouchEvent", {
+			type,
+			"touchPoints": points.map((p, i) => ({"x": p.x, "y": p.y, "id": (p.id === undefined ? i : p.id)})),
+		}),
 		"eval": async (expression) => {
 			const out = await send("Runtime.evaluate", {
 				expression, "returnByValue": true, "awaitPromise": true,

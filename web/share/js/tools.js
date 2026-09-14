@@ -25,7 +25,7 @@
 
 import {ROOT_PREFIX} from "./vars.js";
 import {getUrlParam, browser} from "./bb.js";
-import {setOnClick, setOnDown, setOnUp} from "./events.js";
+import {setOnClick, setOnDown, setOnDrag, setOnUp} from "./events.js";
 
 
 export var tools = new function() {
@@ -157,6 +157,7 @@ export var tools = new function() {
 			// releasing on a cancelled touch -- lives in exactly one place.
 			"setOnClick": setOnClick,
 			"setOnDown": setOnDown,
+			"setOnDrag": setOnDrag,
 			"setOnUp": setOnUp,
 			"setEnabled": function(el, enabled) {
 				if (!enabled && document.activeElement === el) {

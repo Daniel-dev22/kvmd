@@ -1,6 +1,12 @@
 .hidden.window#stream-ocr-window
 	.hidden#stream-ocr-selection
 
+	//- Enter and Escape are the whole interface to this overlay, and a phone
+	//- has neither. Same two actions, reachable by a finger.
+	#stream-ocr-controls
+		button#stream-ocr-confirm-button(disabled) &bull; Recognize
+		button#stream-ocr-cancel-button &bull; Cancel
+
 .hidden.window.window-elegant.window-resizable#stream-window(data-wm-window-show-maximized data-wm-organize-hook)
 	.window-header#stream-window-header
 		.window-grab MJPEG

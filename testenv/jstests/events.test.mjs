@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {read, jsFiles} from "./helpers.mjs";
-import {setOnClick, setOnDown, setOnUp} from "../../web/share/js/events.js";
+import {setOnClick, setOnDown, setOnDrag, setOnUp, dragPoint} from "../../web/share/js/events.js";
 
 const fakeEvent = () => {
 	let prevented = false;
@@ -75,5 +75,80 @@ test("no module hand-rolls its own press/release binding", () => {
 		}
 		assert.doesNotMatch(read(f), /\.ontouchstart\s*=/,
 			`${f}: bind presses through tools.el.setOnDown, not ontouchstart directly`);
+	}
+});
+
+const fakeTouch = (type, touches, changed = []) => ({
+	type,
+	touches,
+	"changedTouches": changed,
+	"preventDefault": () => {},
+});
+
+test("a drag surface binds a mouse, a finger, and the cancel a finger has", () => {
+	const el = {};
+	const seen = [];
+	setOnDrag(el, {
+		"onStart": (p) => seen.push(["start", p.x]),
+		"onMove": (p) => seen.push(["move", p.x]),
+		"onEnd": (p) => seen.push(["end", p.x]),
+		"onCancel": () => seen.push(["cancel"]),
+	});
+	for (const handler of ["onmousedown", "onmousemove", "onmouseup", "ontouchstart", "ontouchmove", "ontouchend", "ontouchcancel"]) {
+		assert.equal(typeof el[handler], "function", `setOnDrag must bind ${handler}`);
+	}
+	el.onmousedown({"clientX": 5, "clientY": 6, "preventDefault": () => {}});
+	el.ontouchcancel({"preventDefault": () => {}});
+	assert.deepEqual(seen, [["start", 5], ["cancel"]]);
+});
+
+test("the last point of a drag comes from changedTouches", () => {
+	// On a touchend the finger is gone from `touches`. Reading it from there
+	// loses the end of every gesture -- the selection would always stop where
+	// the last touchmove happened to land.
+	const moving = fakeTouch("touchmove", [{"clientX": 10, "clientY": 20}]);
+	const ending = fakeTouch("touchend", [], [{"clientX": 30, "clientY": 40}]);
+	assert.deepEqual(dragPoint(moving), {"x": 10, "y": 20});
+	assert.deepEqual(dragPoint(ending), {"x": 30, "y": 40});
+	assert.deepEqual(dragPoint({"clientX": 1, "clientY": 2}), {"x": 1, "y": 2}, "a mouse event still works");
+});
+
+test("a drag prevents the touch defaults and leaves the mouse alone", () => {
+	// The touch defaults replay the whole gesture as synthetic mouse events a
+	// moment later, which starts a second drag over the one just drawn. The
+	// mouse defaults include taking focus, which the surface still needs.
+	const el = {};
+	setOnDrag(el, {"onStart": () => {}, "onMove": () => {}, "onEnd": () => {}, "onCancel": () => {}});
+	let touch_prevented = false;
+	let mouse_prevented = false;
+	el.ontouchstart({
+		"touches": [{"clientX": 1, "clientY": 1}],
+		"changedTouches": [],
+		"preventDefault": () => (touch_prevented = true),
+	});
+	el.onmousedown({"clientX": 1, "clientY": 1, "preventDefault": () => (mouse_prevented = true)});
+	assert.equal(touch_prevented, true);
+	assert.equal(mouse_prevented, false);
+});
+
+test("a drag with no point at all reaches nothing", () => {
+	const el = {};
+	let calls = 0;
+	setOnDrag(el, {
+		"onStart": () => calls++,
+		"onMove": () => calls++,
+		"onEnd": () => calls++,
+		"onCancel": () => calls++,
+	});
+	el.ontouchend(fakeTouch("touchend", [], []));
+	assert.equal(calls, 0, "a callback must never be handed an undefined position");
+});
+
+test("the stream binds the gesture recogniser instead of guessing", () => {
+	const mouse = read("web/share/js/kvm/mouse.js");
+	assert.match(mouse, /TouchGestures/, "kvm/mouse.js must use the shared recogniser");
+	for (const method of ["start", "move", "end", "cancel"]) {
+		assert.match(mouse, new RegExp(`__gestures\\.${method}\\(`),
+			`kvm/mouse.js never calls gestures.${method}()`);
 	}
 });

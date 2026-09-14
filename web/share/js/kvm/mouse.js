@@ -26,6 +26,10 @@
 import {tools, $} from "../tools.js";
 import {HOVER_QUERY} from "../ui.js";
 import {Keypad} from "../keypad.js";
+import {TouchGestures} from "../gestures.js";
+
+
+const CLICK_MS = 50;
 
 
 export function Mouse(__getGeometry, __recordWsEvent) {
@@ -38,16 +42,22 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	var __abs = true;
 
 	var __keypad = null;
+	var __gestures = null;
 
 	var __timer = null;
 
 	var __touch_pos = null;
+	// A real click is not instantaneous. A press and a release delivered in the
+	// same millisecond are a valid HID sequence, but a BIOS or a bootloader
+	// polling the device can sit between the two reports and see neither.
+	var __click_timers = {};
 
 	var __abs_pos = null;
 	var __rel_deltas = [];
 
 	var __init__ = function() {
 		__keypad = new Keypad($("mouse-buttons"), __sendButton);
+		__gestures = new TouchGestures(__touchClick);
 
 		tools.storage.bindSimpleSlider($("hid-mouse-sens-slider"), "hid.mouse.sens", 0.1, 1.9, 0.1, 1.0, function (value) {
 			$("hid-mouse-sens-value").innerText = value.toFixed(1);
@@ -86,8 +96,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		$("stream-box").addEventListener("touchmove", __streamTouchMoveHandler);
 		$("stream-box").addEventListener("touchend", __streamTouchEndHandler);
 		// A cancelled touch never produces a touchend. Without this the button
-		// stays pressed on the host after a system gesture or an incoming call.
-		$("stream-box").addEventListener("touchcancel", __streamTouchEndHandler);
+		// stays pressed on the host after a system gesture or an incoming call,
+		// and a gesture the user never finished would be read as a tap.
+		$("stream-box").addEventListener("touchcancel", __streamTouchCancelHandler);
 
 		tools.storage.bindSimpleSwitch($("hid-mouse-squash-switch"), "hid.mouse.squash", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-y-switch"), "hid.mouse.reverse_scrolling", false);
@@ -219,6 +230,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __streamTouchStartHandler = function(ev) {
 		ev.preventDefault();
+		__gestures.start(__getTouchPoints(ev));
 		let pos = __getTouchPosition(ev, 0);
 		if (__abs && ev.touches.length === 1) {
 			__abs_pos = pos;
@@ -231,6 +243,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __streamTouchMoveHandler = function(ev) {
 		ev.preventDefault();
+		__gestures.move(__getTouchPoints(ev));
 		let pos = __getTouchPosition(ev, 0);
 		if (ev.touches.length === 1) {
 			if (__abs) {
@@ -265,8 +278,46 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __streamTouchEndHandler = function(ev) {
 		ev.preventDefault();
+		// Before the click, so that in absolute mode the cursor is already
+		// where the finger is when the button arrives.
 		__sendPlannedMove();
 		__touch_pos = null;
+		__gestures.end(__getTouchPoints(ev));
+	};
+
+	var __streamTouchCancelHandler = function(ev) {
+		ev.preventDefault();
+		__gestures.cancel();
+		__sendPlannedMove();
+		__touch_pos = null;
+	};
+
+	var __touchClick = function(button) {
+		// A tap is a click on the host: the cursor is already under the finger,
+		// and reaching the floating Mouse window for every click is not a thing
+		// anyone can do one-handed on a phone.
+		if (__click_timers[button]) {
+			// Tapping again before the previous click has finished: end it
+			// first, so a double tap is two clicks rather than one long press.
+			clearTimeout(__click_timers[button]);
+			__keypad.emit(button, false);
+		}
+		__keypad.emit(button, true);
+		__click_timers[button] = setTimeout(function() {
+			__click_timers[button] = null;
+			__keypad.emit(button, false);
+		}, CLICK_MS);
+	};
+
+	var __getTouchPoints = function(ev) {
+		// Every finger still on the surface, in the shape gestures.js wants.
+		// clientX/clientY, because the only thing measured is how far a finger
+		// travelled -- never where it is on the video.
+		let points = [];
+		for (let touch of ev.touches) {
+			points.push({"id": touch.identifier, "x": touch.clientX, "y": touch.clientY});
+		}
+		return points;
 	};
 
 	var __getTouchPosition = function(ev, index) {
