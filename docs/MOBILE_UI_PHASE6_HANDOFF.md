@@ -3,13 +3,13 @@
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`), worktree
 `/docker_container_volumes/kvmd-mobile-first`.
 **Commits:** `2148b643` (the phase), `2d533147` (review fixes), `5f769faf` (a fix found by
-canarying the review fixes), `33cdb1a7` (the phone could not find the keyboard — see below).
+canarying the review fixes), `33cdb1a7` and `af301512` (what the phone said — see below).
 **Status:** committed and pushed. **NOT merged to `master`. Deployed to the kd appliance on
 2026-09-14** and used on a real phone, which produced the finding in §*Surprises* below.
 **Read first:** `MOBILE_UI_PHASE1/2/3/5_HANDOFF.md`. (Phase 4's document describes what Phase 5
 built; its title is misleading.)
 
-**216 tests, 216 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
+**219 tests, 219 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
 tox env, three consecutive clean runs. 16 in the new `gestures.test.mjs` (no browser), 34 in the new
 `touch.test.mjs` (real touchscreen, real mouse), 12 in `events.test.mjs`.
 
@@ -150,6 +150,26 @@ under a screenful of settings and three spoilers. 📏 On a 390×844 emulator th
 the fold, and the only way to it is scrolling a sheet nobody has a reason to scroll. In compact the
 sheet now puts its actions FIRST (`order: -1`, same DOM, desktop untouched).
 
+**Then it said three more things, all of them right** (`af301512`):
+
+- *"I click mouse and it opens full on screen pikvm keyboard."* Typing mode was a **shadow of where
+  focus happened to be** — set on the typing bar's `focus`, cleared 200 ms after its `blur`. Tapping
+  the mouse button in the keyboard's OWN header moves focus, so the full scancode board unfolded
+  over the pad that had just been asked for: 📏 the sheet went **254px → 456px** and the pad was
+  left an 82px strip. Focus moving to another CONTROL is not a decision to stop typing.
+  `relatedTarget` is null only when focus went *nowhere*, which is what dismissing the system
+  keyboard does — and the board is welcome back then. (The same distinction as the OCR overlay's
+  reset, two sections up. Twice in one phase.)
+- *"Some keys are cut off at the top"*, for the keyboard, the pad and the video. A window header is
+  `position: absolute`, so the window reserves its height in padding — and those were **two separate
+  numbers**. The `@media (pointer: coarse)` rule grew the header from 21px to 36px for a finger and
+  the padding stayed where it was. 📏 At 390×640: **14px of the video, 13px of Left/Mid/Right and
+  6px of the layer picker** were painted underneath the header, where no scrolling can reach them.
+  One number now — `--wm-header-h` — and the reservation is derived from it.
+- *"Do we even need those positional buttons on the toolbar?"* Not all of them: a sheet docked by
+  CSS cannot be restored to "original" or "maximized", so those two are hidden in compact. Full
+  screen and full tab both still do something.
+
 **This is Phase 5's change, surfaced by Phase 6's deploy**: before Phase 5 the mouse pad was forced
 open on every compact load and its header carried a keyboard button, so a phone always had one of
 the two on screen. Making the pad open on demand — which was right, it was eating the whole screen —
@@ -276,6 +296,10 @@ same hash.
 while this branch is based on **v4.215**; the web UI is static and served straight off disk, so
 nothing is restarted and no session is interrupted, but that version gap has not been audited for
 API drift.
+
+📏 **Four defects came from one phone in one sitting, none of which any lens or any measurement had
+found**, and three of them were Phase 5's. Two were invisible to this suite because the test page has
+no hardware behind it and no browser chrome, so its sheets are shorter than a real device's.
 
 **Real-device testing remains the highest-yield channel by a wide margin**, and this phase is the one
 that most needs it: every gesture here is a judgement about what a finger MEANT, and four of the six
