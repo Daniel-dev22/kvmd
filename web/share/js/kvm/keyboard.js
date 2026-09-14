@@ -456,7 +456,19 @@ export function Keyboard(__recordWsEvent) {
 			wm.organizeAllWindows();
 		};
 
-		el.addEventListener("blur", function() {
+		el.addEventListener("blur", function(ev) {
+			// Typing mode is a MODE, not a shadow of where focus happens to be.
+			// Focus moving to another CONTROL is not a decision to leave it:
+			// tapping the mouse button in this window's own header blurred the
+			// bar, so 200ms later the full scancode board unfolded over the
+			// pad the user had just asked for -- reported from a phone as
+			// "i click mouse and it opens full on screen pikvm keyboard".
+			// relatedTarget is null only when focus went NOWHERE, which is what
+			// dismissing the system keyboard does; then the board is welcome
+			// back, because the space it was making way for has gone.
+			if (ev.relatedTarget !== null) {
+				return;
+			}
 			// Pressing a key in the strip must not collapse and re-expand the
 			// sheet under the user's finger, so a momentary blur is ignored.
 			__blur_timer = setTimeout(function() {

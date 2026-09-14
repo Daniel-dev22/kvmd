@@ -434,15 +434,98 @@ describe("a phone can reach the keyboard and the mouse", {"skip": chromiumPath()
 				"the typing bar -- the only thing that raises the phone's own keyboard -- is not on screen");
 			assert.equal(typing.barTappable, true, "the typing bar is covered");
 
+			const collapsed = await pg.eval(
+				`Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height)`);
 			await tap(pg, await pg.eval(centre("#keyboard-window-mouse-button")));
+			// Past the 200ms blur debounce: the board used to unfold here.
+			await new Promise((done) => setTimeout(done, 400));
 			const pad = await pg.eval(`(() => {
 				const el = document.getElementById("mouse-window");
-				return {"open": !el.classList.contains("hidden"),
-					"onScreen": el.getBoundingClientRect().bottom <= window.innerHeight + 1};
+				const kbd = document.getElementById("keyboard-window");
+				const layers = [...document.querySelectorAll("#keyboard-compact [data-keypad-layer]")]
+					.filter((row) => row.getBoundingClientRect().height > 0);
+				return {
+					"open": !el.classList.contains("hidden"),
+					"onScreen": el.getBoundingClientRect().bottom <= window.innerHeight + 1,
+					"typing": (document.documentElement.dataset.typing || ""),
+					"layers": layers.length,
+					"keyboard": Math.round(kbd.getBoundingClientRect().height),
+				};
 			})()`);
 			await pg.close();
 			assert.equal(pad.open, true, "the keyboard header did not open the mouse pad");
 			assert.equal(pad.onScreen, true, "the mouse pad opened off the bottom of the screen");
+			// Asking for the mouse is not asking to stop typing. Focus moving to
+			// the button blurred the typing bar, and 200ms later the full
+			// scancode board unfolded over the pad that had just been asked for.
+			assert.equal(pad.typing, "1", "opening the pad dropped out of typing mode");
+			assert.equal(pad.layers, 0,
+				`the scancode board unfolded over the mouse pad: ${pad.layers} rows visible`);
+			// Not exact: docking the pad above it re-runs the sheet geometry and
+			// moves it by a pixel or two. An unfolded board is +200px.
+			assert.ok(pad.keyboard <= collapsed + 10,
+				`the keyboard sheet grew from ${collapsed}px to ${pad.keyboard}px when the pad opened`);
+		});
+	}
+});
+
+describe("nothing is painted underneath a window's own header", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// A window header is position: absolute, so the window has to RESERVE its
+	// height in padding. Those were two separate numbers, and a compact rule
+	// grew the header for a finger without growing the padding -- so 13-14px of
+	// the video, of the mouse buttons and of the keyboard's layer picker were
+	// painted underneath it. Reported from a phone as "some keys are cut off at
+	// the top" and "the stream toolbar is covering a portion of the screen".
+	//
+	// Content BELOW the fold of a scrolling sheet is reachable; content behind
+	// the header never is, at any scroll position.
+	const BEHIND = `(() => {
+		const out = [];
+		for (const win of document.querySelectorAll("div.window")) {
+			const wr = win.getBoundingClientRect();
+			if (wr.height === 0) { continue; }
+			const header = win.querySelector(".window-header");
+			if (header === null) { continue; }
+			const hr = header.getBoundingClientRect();
+			if (hr.height === 0) { continue; }
+			for (const el of win.querySelectorAll("div.key, div.keypad-row, div.keypad-layers, input, div#stream-box, div.buttons-row")) {
+				if (header.contains(el)) { continue; } // the header's own controls
+				const r = el.getBoundingClientRect();
+				if (r.height === 0 || r.width === 0) { continue; }
+				// Only the part that scrolling can never reveal.
+				const hidden = Math.round(Math.min(hr.bottom, r.bottom) - Math.max(hr.top, r.top));
+				if (hidden > 0 && win.scrollTop === 0) {
+					out.push({
+						"win": win.id,
+						"el": (el.id || el.className).slice(0, 30),
+						"code": (el.dataset.keypadCode || ""),
+						"hidden": hidden,
+					});
+				}
+			}
+		}
+		return out;
+	})()`;
+
+	for (const [width, height] of [[390, 844], [390, 640], [320, 568]]) {
+		test(`every open window at ${width}x${height}`, async () => {
+			const pg = await open(width, {height});
+			await pg.eval(SHOW_KEYBOARD);
+			const seen = [];
+			// Typing mode, the full board, and the pad on top of both: three
+			// different sheet heights, which is what moves the content under
+			// the header.
+			seen.push(["typing", await pg.eval(BEHIND)]);
+			await pg.eval(showLayer("abc"));
+			seen.push(["board", await pg.eval(BEHIND)]);
+			await tap(pg, await pg.eval(centre("#keyboard-window-mouse-button")));
+			await new Promise((done) => setTimeout(done, 400));
+			seen.push(["pad", await pg.eval(BEHIND)]);
+			await pg.close();
+			for (const [what, behind] of seen) {
+				assert.deepEqual(behind, [],
+					`${width}x${height}, ${what}: painted under a window header, where no scroll can reach it`);
+			}
 		});
 	}
 });

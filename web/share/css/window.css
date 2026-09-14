@@ -31,13 +31,21 @@ div.window {
 	white-space: nowrap;
 	color: var(--cs-window-default-fg);
 	background-color: var(--cs-window-default-bg);
-	padding: 30px 9px 9px 9px;
+	/* The header is position: absolute, so the window has to RESERVE its height
+	   or the first row of content is painted underneath it. Both numbers used to
+	   be written down separately: the coarse-pointer rule below grew the header
+	   from 21px to 36px for a finger and the padding stayed where it was, so on
+	   a phone 13-14px of the video, of the mouse buttons and of the keyboard's
+	   layer picker were behind the header -- reported as "some keys are cut off
+	   at the top". One number now, and the reservation follows it. */
+	--wm-header-h: 21px; /* 20px + its bottom border */
+	padding: calc(var(--wm-header-h) + 9px) 9px 9px 9px;
 }
 div.window[data-wm-window-always-on-top] {
 	z-index: 2147483643;
 }
 div.window.window-elegant {
-	padding-top: 23px;
+	padding-top: calc(var(--wm-header-h) + 2px);
 	padding-left: 2px;
 	padding-right: 2px;
 }
@@ -146,6 +154,11 @@ div.window[data-x-wm-window-maximized] div.window-header div.window-buttons butt
 
 /* Window chrome has to be grabbable by a finger. */
 @media (pointer: coarse) {
+	div.window {
+		/* Grown for a finger, and the padding above follows it. */
+		--wm-header-h: 36px;
+	}
+
 	div.window div.window-header,
 	div.window div.window-header div.window-grab {
 		min-height: 35px;
@@ -193,4 +206,14 @@ div.window[data-x-wm-window-maximized] div.window-header div.window-buttons butt
    height, and it is 0 when nothing else is docked. */
 :root[data-ui="mobile"] div.window#mouse-window:not(.window-full-tab) {
 	bottom: calc(var(--wm-kb-inset, 0px) + var(--wm-dock-offset, 0px)) !important;
+}
+
+
+/* A sheet docked by CSS cannot be restored to "original" or "maximized": those
+   two buttons are window-geometry controls with no geometry to control, and on
+   a phone they are two more things to mis-tap in a 36px strip over the video.
+   Full screen and full tab both still DO something, so they stay. */
+:root[data-ui="mobile"] div.window div.window-header div.window-buttons button[data-wm-window-set-original],
+:root[data-ui="mobile"] div.window div.window-header div.window-buttons button[data-wm-window-set-maximized] {
+	display: none;
 }
