@@ -490,6 +490,19 @@ function __WindowManager() {
 		}
 	};
 
+	// A navbar menu is open. The stream asks before turning a touch into a
+	// click: the tap that dismisses a sheet lands on the video underneath it,
+	// and dismissing something is not clicking the host. Menus are this
+	// module's business, so the selector for them lives here and nowhere else.
+	self.isMenuOpen = function() {
+		for (let el_bt of $$("menu-button")) {
+			if (tools.hidden.isVisible(el_bt.parentElement.querySelector(".menu"))) {
+				return true;
+			}
+		}
+		return false;
+	};
+
 	var __toggleMenu = function(el_a) {
 		let all_hidden = true;
 

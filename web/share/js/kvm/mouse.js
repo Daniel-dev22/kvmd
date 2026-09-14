@@ -25,11 +25,19 @@
 
 import {tools, $} from "../tools.js";
 import {HOVER_QUERY} from "../ui.js";
+import {wm} from "../wm.js";
 import {Keypad} from "../keypad.js";
 import {TouchGestures} from "../gestures.js";
 
 
+// A real click has a duration. It also makes the on-screen Left button visibly
+// flash, which is the only acknowledgement a phone user gets that their tap
+// became a click -- there is no cursor under their finger to watch.
 const CLICK_MS = 50;
+
+// Every button the pad can latch. A latched button means a drag is in progress
+// on the host, and a gesture must not interfere with one.
+const BUTTONS = ["left", "middle", "right", "up", "down"];
 
 
 export function Mouse(__getGeometry, __recordWsEvent) {
@@ -47,17 +55,23 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	var __timer = null;
 
 	var __touch_pos = null;
-	// A real click is not instantaneous. A press and a release delivered in the
-	// same millisecond are a valid HID sequence, but a BIOS or a bootloader
-	// polling the device can sit between the two reports and see neither.
 	var __click_timers = {};
+	// Whether the gesture under way is allowed to click at all, decided once
+	// when the first finger lands -- see __tapClickAllowed().
+	var __gesture_live = false;
 
 	var __abs_pos = null;
 	var __rel_deltas = [];
 
 	var __init__ = function() {
 		__keypad = new Keypad($("mouse-buttons"), __sendButton);
-		__gestures = new TouchGestures(__touchClick);
+		__gestures = new TouchGestures({
+			"onClick": __touchClick,
+			// "A right click is ready; lift to send it." The keypad learned
+			// this lesson first: a 500ms promotion that arrives with no warning
+			// is not something a user can consent to.
+			"onArm": (on) => $("stream-box").classList.toggle("stream-box-click-armed", on),
+		});
 
 		tools.storage.bindSimpleSlider($("hid-mouse-sens-slider"), "hid.mouse.sens", 0.1, 1.9, 0.1, 1.0, function (value) {
 			$("hid-mouse-sens-value").innerText = value.toFixed(1);
@@ -100,6 +114,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		// and a gesture the user never finished would be read as a tap.
 		$("stream-box").addEventListener("touchcancel", __streamTouchCancelHandler);
 
+		tools.storage.bindSimpleSwitch($("hid-mouse-tap-click-switch"), "hid.mouse.tap_click", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-squash-switch"), "hid.mouse.squash", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-y-switch"), "hid.mouse.reverse_scrolling", false);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-x-switch"), "hid.mouse.reverse_panning", false);
@@ -230,7 +245,14 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __streamTouchStartHandler = function(ev) {
 		ev.preventDefault();
-		__gestures.start(__getTouchPoints(ev));
+		if (ev.targetTouches.length === 1) {
+			// The first finger on the video: this is where a gesture begins,
+			// and the only honest moment to decide whether it may click.
+			__gesture_live = __tapClickAllowed();
+		}
+		if (__gesture_live) {
+			__gestures.start(__getTouchPoints(ev));
+		}
 		let pos = __getTouchPosition(ev, 0);
 		if (__abs && ev.touches.length === 1) {
 			__abs_pos = pos;
@@ -243,7 +265,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __streamTouchMoveHandler = function(ev) {
 		ev.preventDefault();
-		__gestures.move(__getTouchPoints(ev));
+		if (__gesture_live) {
+			__gestures.move(__getTouchPoints(ev));
+		}
 		let pos = __getTouchPosition(ev, 0);
 		if (ev.touches.length === 1) {
 			if (__abs) {
@@ -278,24 +302,55 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __streamTouchEndHandler = function(ev) {
 		ev.preventDefault();
-		// Before the click, so that in absolute mode the cursor is already
-		// where the finger is when the button arrives.
 		__sendPlannedMove();
 		__touch_pos = null;
-		__gestures.end(__getTouchPoints(ev));
+		if (__gesture_live) {
+			__gestures.end(__getTouchPoints(ev));
+		}
+		if (ev.targetTouches.length === 0) {
+			__gesture_live = false;
+		}
 	};
 
 	var __streamTouchCancelHandler = function(ev) {
 		ev.preventDefault();
-		__gestures.cancel();
+		if (__gesture_live) {
+			__gestures.cancel(__getTouchPoints(ev));
+		}
 		__sendPlannedMove();
 		__touch_pos = null;
+		if (ev.targetTouches.length === 0) {
+			__gesture_live = false;
+		}
+	};
+
+	// Decided once per gesture, because every one of these can change while a
+	// finger is down and a gesture that started innocently must not become a
+	// click halfway through.
+	var __tapClickAllowed = function() {
+		if (!$("hid-mouse-tap-click-switch").checked) {
+			return false;
+		}
+		if (wm.isMenuOpen()) {
+			// The tap that dismisses a sheet lands on the video underneath it.
+			// Dismissing something is not clicking the host.
+			return false;
+		}
+		// A latched button is a drag in progress on the host. emit() would
+		// release it -- and __unholdAll() would drop it even for another
+		// button -- so the video stops clicking until the drag is finished.
+		return !BUTTONS.some((code) => __keypad.isCodeActive(code));
 	};
 
 	var __touchClick = function(button) {
-		// A tap is a click on the host: the cursor is already under the finger,
-		// and reaching the floating Mouse window for every click is not a thing
-		// anyone can do one-handed on a phone.
+		// A tap is a click on the host. In absolute mode the cursor is already
+		// under the finger; in relative mode this is a trackpad, and the click
+		// lands where the host's own cursor is.
+		if (__keypad.isCodeActive(button)) {
+			// emit(code, true) on a key that is already down RELEASES it. A
+			// latched button belongs to the user, not to this gesture.
+			return;
+		}
 		if (__click_timers[button]) {
 			// Tapping again before the previous click has finished: end it
 			// first, so a double tap is two clicks rather than one long press.
@@ -310,11 +365,13 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __getTouchPoints = function(ev) {
-		// Every finger still on the surface, in the shape gestures.js wants.
-		// clientX/clientY, because the only thing measured is how far a finger
-		// travelled -- never where it is on the video.
+		// targetTouches, NOT touches: the fingers that started on the video and
+		// are still down. `touches` is every contact on the SCREEN, and a touch
+		// only ever dispatches to the element it started on -- so a thumb
+		// resting below the video appears in every event here and its lift
+		// never does, which left the gesture counting two fingers forever.
 		let points = [];
-		for (let touch of ev.touches) {
+		for (let touch of ev.targetTouches) {
 			points.push({"id": touch.identifier, "x": touch.clientX, "y": touch.clientY});
 		}
 		return points;

@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {read, jsFiles} from "./helpers.mjs";
-import {setOnClick, setOnDown, setOnDrag, setOnUp, dragPoint} from "../../web/share/js/events.js";
+import {setOnClick, setOnDown, setOnDrag, setOnUp} from "../../web/share/js/events.js";
 
 const fakeEvent = () => {
 	let prevented = false;
@@ -78,39 +78,59 @@ test("no module hand-rolls its own press/release binding", () => {
 	}
 });
 
-const fakeTouch = (type, touches, changed = []) => ({
-	type,
-	touches,
+const touchEvent = (touches, changed = []) => ({
+	"touches": touches,
+	"targetTouches": touches,
 	"changedTouches": changed,
 	"preventDefault": () => {},
 });
+const finger = (id, x, y) => ({"identifier": id, "clientX": x, "clientY": y});
 
-test("a drag surface binds a mouse, a finger, and the cancel a finger has", () => {
+function dragHarness() {
 	const el = {};
 	const seen = [];
 	setOnDrag(el, {
-		"onStart": (p) => seen.push(["start", p.x]),
-		"onMove": (p) => seen.push(["move", p.x]),
-		"onEnd": (p) => seen.push(["end", p.x]),
+		"onStart": (p) => seen.push(["start", p.x, p.y]),
+		"onMove": (p) => seen.push(["move", p.x, p.y]),
+		"onEnd": (p) => seen.push(["end", p.x, p.y]),
 		"onCancel": () => seen.push(["cancel"]),
 	});
+	return {el, seen};
+}
+
+test("a drag surface binds a mouse, a finger, and the cancel a finger has", () => {
+	const {el, seen} = dragHarness();
 	for (const handler of ["onmousedown", "onmousemove", "onmouseup", "ontouchstart", "ontouchmove", "ontouchend", "ontouchcancel"]) {
 		assert.equal(typeof el[handler], "function", `setOnDrag must bind ${handler}`);
 	}
 	el.onmousedown({"clientX": 5, "clientY": 6, "preventDefault": () => {}});
 	el.ontouchcancel({"preventDefault": () => {}});
-	assert.deepEqual(seen, [["start", 5], ["cancel"]]);
+	assert.deepEqual(seen, [["start", 5, 6], ["cancel"]]);
 });
 
 test("the last point of a drag comes from changedTouches", () => {
 	// On a touchend the finger is gone from `touches`. Reading it from there
 	// loses the end of every gesture -- the selection would always stop where
 	// the last touchmove happened to land.
-	const moving = fakeTouch("touchmove", [{"clientX": 10, "clientY": 20}]);
-	const ending = fakeTouch("touchend", [], [{"clientX": 30, "clientY": 40}]);
-	assert.deepEqual(dragPoint(moving), {"x": 10, "y": 20});
-	assert.deepEqual(dragPoint(ending), {"x": 30, "y": 40});
-	assert.deepEqual(dragPoint({"clientX": 1, "clientY": 2}), {"x": 1, "y": 2}, "a mouse event still works");
+	const {el, seen} = dragHarness();
+	el.ontouchstart(touchEvent([finger(7, 10, 20)], [finger(7, 10, 20)]));
+	el.ontouchmove(touchEvent([finger(7, 30, 40)]));
+	el.ontouchend(touchEvent([], [finger(7, 55, 66)]));
+	assert.deepEqual(seen, [["start", 10, 20], ["move", 30, 40], ["end", 55, 66]]);
+});
+
+test("the drag follows the finger that started it, not whichever is first", () => {
+	// `touches[0]` is not "the finger drawing": a second contact anywhere can
+	// take index 0, and the box then jumps to it and ends where IT is.
+	const {el, seen} = dragHarness();
+	el.ontouchstart(touchEvent([finger(1, 10, 10)], [finger(1, 10, 10)]));
+	// A second finger lands: the drag is abandoned rather than handed over.
+	el.ontouchstart(touchEvent([finger(1, 10, 10), finger(2, 900, 900)], [finger(2, 900, 900)]));
+	el.ontouchmove(touchEvent([finger(1, 12, 12), finger(2, 800, 800)]));
+	el.ontouchend(touchEvent([finger(1, 12, 12)], [finger(2, 800, 800)]));
+	el.ontouchend(touchEvent([], [finger(1, 12, 12)]));
+	assert.deepEqual(seen, [["start", 10, 10], ["cancel"]],
+		"a pinch is not a selection, and no point of the second finger may reach the callbacks");
 });
 
 test("a drag prevents the touch defaults and leaves the mouse alone", () => {
@@ -122,8 +142,9 @@ test("a drag prevents the touch defaults and leaves the mouse alone", () => {
 	let touch_prevented = false;
 	let mouse_prevented = false;
 	el.ontouchstart({
-		"touches": [{"clientX": 1, "clientY": 1}],
-		"changedTouches": [],
+		"touches": [finger(1, 1, 1)],
+		"targetTouches": [finger(1, 1, 1)],
+		"changedTouches": [finger(1, 1, 1)],
 		"preventDefault": () => (touch_prevented = true),
 	});
 	el.onmousedown({"clientX": 1, "clientY": 1, "preventDefault": () => (mouse_prevented = true)});
@@ -131,17 +152,11 @@ test("a drag prevents the touch defaults and leaves the mouse alone", () => {
 	assert.equal(mouse_prevented, false);
 });
 
-test("a drag with no point at all reaches nothing", () => {
-	const el = {};
-	let calls = 0;
-	setOnDrag(el, {
-		"onStart": () => calls++,
-		"onMove": () => calls++,
-		"onEnd": () => calls++,
-		"onCancel": () => calls++,
-	});
-	el.ontouchend(fakeTouch("touchend", [], []));
-	assert.equal(calls, 0, "a callback must never be handed an undefined position");
+test("a stray release reaches nothing", () => {
+	const {el, seen} = dragHarness();
+	el.ontouchend(touchEvent([], [finger(3, 1, 1)]));
+	el.ontouchmove(touchEvent([finger(3, 2, 2)]));
+	assert.deepEqual(seen, [], "no drag is in progress, so there is nothing to report");
 });
 
 test("the stream binds the gesture recogniser instead of guessing", () => {
@@ -151,4 +166,8 @@ test("the stream binds the gesture recogniser instead of guessing", () => {
 		assert.match(mouse, new RegExp(`__gestures\\.${method}\\(`),
 			`kvm/mouse.js never calls gestures.${method}()`);
 	}
+	// targetTouches, not touches: the difference is a thumb resting anywhere
+	// else on the screen turning the next tap into a two-finger gesture.
+	assert.match(mouse, /for \(let touch of ev\.targetTouches\)/,
+		"kvm/mouse.js must feed the recogniser the fingers that started on the video");
 });

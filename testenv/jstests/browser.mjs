@@ -174,11 +174,22 @@ async function newPage(port) {
 		}),
 		// A real touch, routed and hit-tested by the engine -- not a synthetic
 		// TouchEvent handed straight to a listener, which would prove only that
-		// the listener exists. `points` is every finger still down; touchEnd
-		// and touchCancel take none.
+		// the listener exists. For touchStart and touchMove, `points` is every
+		// finger down; for touchEnd and touchCancel it is the points being
+		// RELEASED, and an empty list means all of them -- so lifting one of
+		// two fingers is touchEnd with just that one.
 		"touch": (type, points = []) => send("Input.dispatchTouchEvent", {
 			type,
 			"touchPoints": points.map((p, i) => ({"x": p.x, "y": p.y, "id": (p.id === undefined ? i : p.id)})),
+		}),
+		// A real mouse, for the same reason. Dispatching a MouseEvent from
+		// inside the page runs NO default action -- no focus change, no
+		// suppression on a disabled control -- so a test written that way
+		// cannot see the two mechanisms that made the OCR buttons inert with a
+		// real pointer.
+		"mouse": (type, x, y, button = "left", clicks = 1) => send("Input.dispatchMouseEvent", {
+			type, x, y, button, "clickCount": clicks,
+			"buttons": (type === "mouseReleased" || button === "none" ? 0 : 1),
 		}),
 		"eval": async (expression) => {
 			const out = await send("Runtime.evaluate", {

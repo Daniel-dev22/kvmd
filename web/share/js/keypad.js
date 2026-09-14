@@ -41,7 +41,7 @@ export function Keypad(__el_keypad, __sendKey) {
 			if (el_key.hasAttribute("data-keypad-modifier")) {
 				el_key.title = "Tap to hold, again to lock, again to release; long left click or short right click for hold, middle for lock";
 			} else if (el_key.hasAttribute("data-keypad-allow-autohold")) {
-				el_key.title = "Long left click or short right click for hold, middle for lock; tap a held key to lock it";
+				el_key.title = "Long left click or short right click for hold, middle for lock";
 			} else {
 				el_key.title = "Right click for hold, middle for lock";
 			}
@@ -139,25 +139,25 @@ export function Keypad(__el_keypad, __sendKey) {
 	};
 
 	// A finger has no middle or right button, so the two fixed states a mouse
-	// reaches with them are reached by tapping instead. One rule covers every
-	// key: a tap ADVANCES a key that is already latched -- hold, then lock,
-	// then off -- and a tap on an idle MODIFIER latches it, because a modifier
-	// pressed on its own does nothing at all. Every other key keeps its
-	// momentary tap, which is why PrintScreen and the Japanese mode keys carry
-	// "hold" rather than "mod" in window-keyboard.pug: they can be held by a
-	// long press, but tapping one has to send it.
+	// reaches with them are reached by tapping a MODIFIER instead: hold, then
+	// lock, then off. A modifier is the one kind of key that does nothing
+	// pressed on its own, which is what makes latching it the obvious reading
+	// of a tap.
+	//
+	// Nothing else takes part. PrintScreen and the Japanese mode keys carry
+	// "hold" rather than "mod" in window-keyboard.pug -- they can be held by a
+	// long press, but tapping one has to SEND it -- and neither do the
+	// on-screen mouse buttons, where a latched Left is how a finger drags on
+	// the host and a tap has to drop it, not lock it down harder.
 	//
 	// Returns true when the tap was consumed here.
 	var __touchLatchHandler = function(el_key) {
-		if (__isActive(el_key, "locked")) {
+		if (!el_key.hasAttribute("data-keypad-modifier") || __isActive(el_key, "locked")) {
 			// Clearing a latch lives in exactly one place -- the release path
 			// below, which already does it for a mouse.
 			return false;
 		}
 		let held = __isActive(el_key, "holded");
-		if (!held && !el_key.hasAttribute("data-keypad-modifier")) {
-			return false;
-		}
 		let down = __isActive(el_key);
 		__stopHoldTimer(el_key);
 		__deactivate(el_key);
@@ -201,11 +201,14 @@ export function Keypad(__el_keypad, __sendKey) {
 	};
 
 	var __stopHoldTimer = function(el_key) {
-		__setHolding(el_key, false);
 		let code = el_key.getAttribute("data-keypad-code");
 		if (!__hold_timers[code]) {
+			// Nothing armed, so nothing marked: the class is only ever set
+			// alongside a timer. __unholdAll() calls this for every key on the
+			// board on every keystroke, so it stays a map read.
 			return false;
 		}
+		__setHolding(el_key, false);
 		clearTimeout(__hold_timers[code]);
 		__hold_timers[code] = null;
 		return true;

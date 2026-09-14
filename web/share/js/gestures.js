@@ -22,30 +22,53 @@
 // Telling a tap from a drag, on the one surface where a touch cannot simply
 // mean "press what is under my finger": the video of the host.
 //
-// A finger there has to be able to do everything a mouse can -- click where the
-// cursor is, right click, middle click -- while a DRAG still moves the cursor
-// and two fingers still scroll. Those are told apart by distance and time only,
-// never by the element under the finger, which is why this file has no DOM in
-// it at all and is unit-tested without a browser.
+// A finger there has to be able to click where the cursor is and right click,
+// while a DRAG still moves the cursor and two fingers still scroll. Those are
+// told apart by distance and time only, never by the element under the finger,
+// which is why this file has no DOM in it at all and is unit-tested without a
+// browser.
+//
+// The other end of this is somebody's server, often at a BIOS prompt, so every
+// ambiguous case resolves to SENDING NOTHING. Two deliberate consequences:
+//
+//   * There is no two-finger middle click. A two-finger tap cannot be told
+//     apart from a two-finger scroll that did not travel far enough, which is
+//     the gesture an operator makes by reflex on a video pane -- and a middle
+//     click pastes the X11 PRIMARY selection, which at a root shell executes
+//     whatever it holds. Middle click is on the on-screen Mouse pad, where it
+//     is asked for rather than guessed.
+//
+//   * The right click is ARMED at 500ms and committed when the finger LIFTS,
+//     inside a bounded window. The user can see it coming and can still abandon
+//     it by moving; a finger simply resting on the screen runs past the window
+//     and sends nothing.
 
 "use strict";
 
 
-// A finger never lands still: some slop is a tap, not a drag. Deliberately
-// smaller than mouse.js's 15px scroll step, so a wobble that is too small to
-// scroll is also too big to click -- the quiet answer is the safe one when the
-// other end is someone's server.
+// A finger never lands still: this much slop is still a tap.
 export const TAP_SLOP_PX = 10;
 
-// The same 500ms keypad.js uses to latch a key, for the same reason: it is
-// about as long as a press can be before it stops feeling like a tap.
+// The same 500ms keypad.js uses to latch a key, for the same reason: about as
+// long as a press can be before it stops feeling like a tap.
 export const LONG_PRESS_MS = 500;
 
+// ...and past this, it stops feeling like a press at all. A finger left on the
+// screen while reading is not asking for anything.
+export const LONG_PRESS_MAX_MS = 2000;
 
-// cb(button) is called with "left", "right" or "middle" the moment a gesture is
-// recognised. Everything after that -- pressing the button, holding it for a
-// believable length of time, releasing it -- belongs to the caller.
-export function TouchGestures(cb, deps={}) {
+
+// onClick(button) is called with "left" or "right" the moment a gesture is
+// recognised; onArm(bool) whenever the right click becomes (un)available, so
+// the surface can show it. Pressing the button, holding it for a believable
+// length of time and releasing it belong to the caller.
+//
+// Every points argument is the fingers that started on THIS element and are
+// still down -- ev.targetTouches, never ev.touches. `touches` is every contact
+// on the screen, including fingers resting on other elements whose lift this
+// element is never told about, which is how a thumb parked below the video
+// turned the next ordinary tap into a two-finger gesture.
+export function TouchGestures({onClick, onArm}, deps={}) {
 	var self = this;
 
 	/************************************************************************/
@@ -58,14 +81,17 @@ export function TouchGestures(cb, deps={}) {
 	var __fingers = 0; // The MOST fingers this gesture has held at once
 	var __started = 0;
 	var __moved = false;
-	var __clicked = false; // The long press already produced its click
-	var __timer = null;
+	var __dead = false; // Cancelled, and fingers are still down
+	var __armed = false;
+	var __arm_timer = null;
+	var __expire_timer = null;
 
 	/************************************************************************/
 
-	// points: [{"id": <identifier>, "x": <clientX>, "y": <clientY>}, ...],
-	// i.e. every finger currently on the surface, not just the new one.
 	self.start = function(points) {
+		if (__dead) {
+			return;
+		}
 		if (__fingers === 0) {
 			__reset();
 			__started = __now();
@@ -76,15 +102,18 @@ export function TouchGestures(cb, deps={}) {
 			}
 		}
 		__fingers = Math.max(__fingers, points.length);
-		if (__fingers === 1 && !__moved && !__clicked) {
-			__arm();
+		if (__fingers === 1 && !__moved) {
+			__armLater();
 		} else {
-			// A second finger is a scroll or a middle click, never a right one.
+			// A second finger is a scroll, never a click.
 			__disarm();
 		}
 	};
 
 	self.move = function(points) {
+		if (__dead) {
+			return;
+		}
 		for (let point of points) {
 			let origin = __origins.get(point.id);
 			if (origin && (
@@ -99,47 +128,75 @@ export function TouchGestures(cb, deps={}) {
 		}
 	};
 
-	// points: the fingers STILL down (ev.touches). The gesture ends when the
-	// last one lifts, not when the first does -- a two-finger tap releases in
-	// two events and is one gesture.
+	// The gesture ends when the LAST finger lifts, not when the first does.
 	self.end = function(points) {
-		__disarm();
 		if (points.length > 0) {
+			// An identifier is reusable the moment its touch ends, so a finger
+			// landing later could inherit this one's origin and look like it
+			// had travelled the distance between them.
+			let live = new Set(points.map((point) => point.id));
+			for (let id of [...__origins.keys()]) {
+				if (!live.has(id)) {
+					__origins.delete(id);
+				}
+			}
+			__disarm();
 			return;
 		}
-		let button = null;
-		if (!__moved && !__clicked && (__now() - __started) <= LONG_PRESS_MS) {
-			button = (__fingers === 1 ? "left" : (__fingers === 2 ? "middle" : null));
-		}
+		let armed = __armed;
+		let elapsed = (__now() - __started);
+		let tapped = (__fingers === 1 && !__moved && !__dead);
 		__reset();
-		if (button) {
-			cb(button);
+		__dead = false;
+		if (!tapped) {
+			return;
 		}
+		if (armed) {
+			onClick("right");
+		} else if (elapsed < LONG_PRESS_MS) {
+			onClick("left");
+		}
+		// Longer than the armed window: a finger was resting, not pressing.
 	};
 
-	// A touch the browser or the system took away. It is NOT a tap: the user
-	// may never have meant to touch the host at all.
-	self.cancel = function() {
+	// A touch the browser or the system took away -- a back-swipe, a shade
+	// pull, an incoming call. It is not a tap, and neither is whatever the
+	// fingers still on the screen do next: they are the tail of a gesture the
+	// user has already lost, so nothing counts again until the screen is clear.
+	self.cancel = function(points) {
 		__reset();
+		__dead = (points.length > 0);
 	};
 
 	/************************************************************************/
 
-	var __arm = function() {
+	var __armLater = function() {
 		__disarm();
-		__timer = __setTimer(function() {
-			__timer = null;
-			if (!__moved && __fingers === 1) {
-				__clicked = true;
-				cb("right");
-			}
+		__arm_timer = __setTimer(function() {
+			__arm_timer = null;
+			__setArmed(true);
+			__expire_timer = __setTimer(function() {
+				__expire_timer = null;
+				__setArmed(false);
+			}, (LONG_PRESS_MAX_MS - LONG_PRESS_MS));
 		}, LONG_PRESS_MS);
 	};
 
 	var __disarm = function() {
-		if (__timer !== null) {
-			__clearTimer(__timer);
-			__timer = null;
+		for (let timer of [__arm_timer, __expire_timer]) {
+			if (timer !== null) {
+				__clearTimer(timer);
+			}
+		}
+		__arm_timer = null;
+		__expire_timer = null;
+		__setArmed(false);
+	};
+
+	var __setArmed = function(on) {
+		if (__armed !== on) {
+			__armed = on;
+			onArm(on);
 		}
 	};
 
@@ -148,6 +205,5 @@ export function TouchGestures(cb, deps={}) {
 		__origins.clear();
 		__fingers = 0;
 		__moved = false;
-		__clicked = false;
 	};
 }

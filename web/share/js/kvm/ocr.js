@@ -50,7 +50,17 @@ export function Ocr(__getGeometry) {
 			tools.storage.set("stream.ocr.lang", $("stream-ocr-lang-selector").value);
 		});
 
-		$("stream-ocr-window").addEventListener("blur", __resetSelection);
+		// The overlay forgets its selection when the user leaves it. Focus
+		// moving to a control INSIDE it has not left it -- and a mouse moves
+		// focus there by default the instant the button is pressed, which used
+		// to reset the selection and disable the button before its own click
+		// could ever fire. focusout rather than blur, because only focusout
+		// says where the focus WENT.
+		$("stream-ocr-window").addEventListener("focusout", function(ev) {
+			if (ev.relatedTarget === null || !$("stream-ocr-window").contains(ev.relatedTarget)) {
+				__resetSelection();
+			}
+		});
 		$("stream-ocr-window").addEventListener("resize", __resetSelection);
 		$("stream-ocr-window").close_hook = __resetSelection;
 
@@ -121,12 +131,21 @@ export function Ocr(__getGeometry) {
 		if (__isControl(ev.target)) {
 			return;
 		}
-		if (__start_pos === null) {
-			tools.hidden.setVisible($("stream-ocr-selection"), false);
-			__setSelection(null);
-			__start_pos = __getGlobalPosition(point);
-			__end_pos = null;
+		if (ev.buttons !== undefined && ev.buttons !== 1) {
+			// Not the primary button on its own: a second button pressed during
+			// a drag, or a right/middle press. Neither draws.
+			return;
 		}
+		// A fresh press always starts a fresh box. This used to be guarded on
+		// `__start_pos === null`, which wedged PERMANENTLY the first time a
+		// release went missing -- released over a disabled control, where the
+		// engine suppresses the event, or outside the overlay entirely. Every
+		// later selection was then anchored to a corner the user drew once,
+		// silently, and that rectangle is what got recognised.
+		tools.hidden.setVisible($("stream-ocr-selection"), false);
+		__setSelection(null);
+		__start_pos = __getGlobalPosition(point);
+		__end_pos = null;
 	};
 
 	var __changeSelection = function(point) {
@@ -135,16 +154,26 @@ export function Ocr(__getGeometry) {
 			let width = Math.abs(__start_pos.x - __end_pos.x);
 			let height = Math.abs(__start_pos.y - __end_pos.y);
 			let el = $("stream-ocr-selection");
-			el.style.left = Math.min(__start_pos.x, __end_pos.x) + "px";
-			el.style.top = Math.min(__start_pos.y, __end_pos.y) + "px";
+			// The box is drawn INSIDE the overlay, so the client coordinates
+			// the gesture is measured in have to be rebased onto the overlay's
+			// own origin. This used to be a Firefox-only correction that
+			// assumed the navbar's height ("на лисе наблюдается оффсет из-за
+			// навбара"): the offset is real in any browser wherever the overlay
+			// does not start at the top of the page, which in the compact
+			// layout is always -- the box was drawn 55px below the finger.
+			let base = $("stream-ocr-window").getBoundingClientRect();
+			el.style.left = (Math.min(__start_pos.x, __end_pos.x) - base.left) + "px";
+			el.style.top = (Math.min(__start_pos.y, __end_pos.y) - base.top) + "px";
 			el.style.width = width + "px";
 			el.style.height = height + "px";
 			tools.hidden.setVisible(el, (width > 1 || height > 1));
 		}
 	};
 
-	var __endSelection = function(point, ev) {
-		if (__start_pos === null || __isControl(ev.target)) {
+	var __endSelection = function(point) {
+		if (__start_pos === null) {
+			// A release with no press of ours: nothing to finish. A tap on a
+			// control lands here, because __startSelection ignored its press.
 			return;
 		}
 		__changeSelection(point);
@@ -158,9 +187,8 @@ export function Ocr(__getGeometry) {
 			let rect = $("stream-box").getBoundingClientRect();
 			let rel_left = Math.min(__start_pos.x, __end_pos.x) - rect.left;
 			let rel_right = Math.max(__start_pos.x, __end_pos.x) - rect.left;
-			let offset = __getNavbarOffset();
-			let rel_top = Math.min(__start_pos.y, __end_pos.y) - rect.top + offset;
-			let rel_bottom = Math.max(__start_pos.y, __end_pos.y) - rect.top + offset;
+			let rel_top = Math.min(__start_pos.y, __end_pos.y) - rect.top;
+			let rel_bottom = Math.max(__start_pos.y, __end_pos.y) - rect.top;
 			let geo = __getGeometry();
 			__setSelection({
 				"left": tools.remap(rel_left - geo.x, 0, geo.width, 0, geo.real_width),
@@ -189,22 +217,15 @@ export function Ocr(__getGeometry) {
 		}
 	};
 
+	// Client coordinates throughout, clamped to the video: one basis, and the
+	// rebase onto the overlay happens in the one place that draws.
 	var __getGlobalPosition = function(point) {
 		let rect = $("stream-box").getBoundingClientRect();
 		let geo = __getGeometry();
-		let offset = __getNavbarOffset();
 		return {
 			"x": Math.min(Math.max(point.x, rect.left + geo.x), rect.right - geo.x),
-			"y": Math.min(Math.max(point.y - offset, rect.top + geo.y - offset), rect.bottom - geo.y - offset),
+			"y": Math.min(Math.max(point.y, rect.top + geo.y), rect.bottom - geo.y),
 		};
-	};
-
-	var __getNavbarOffset = function() {
-		if (tools.browser.is_firefox) {
-			// На лисе наблюдается оффсет из-за навбара, хз почему
-			return wm.getViewGeometry().top;
-		}
-		return 0;
 	};
 
 	var __resetSelection = function() {

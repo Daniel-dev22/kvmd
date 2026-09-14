@@ -73,10 +73,33 @@ div#stream-box {
 	height: 100%;
 	object-fit: contain;
 	position: relative;
+	/* A long press on the video is a right click on the HOST. Without this,
+	   iOS Safari answers it with its own "Save Image" callout over the stream
+	   -- the page prevents the touch default, but the callout is a separate
+	   opt-out. Reasoned from Apple's documented behaviour; not measured here,
+	   because nothing in this suite is an iPhone. */
+	-webkit-touch-callout: none;
 	display: inline-block;
 	border: var(--border-window-default-thin);
 	margin: -1px -1px -1px -1px; /* See pikvm/kvm#86, pikvm/pikvm#599 */
 }
+/* "Lift now and this is a right click." The keypad's latch learned first that a
+   500ms promotion with nothing on screen is not something a user can consent
+   to; this is the same warning, on the surface that presses buttons on somebody
+   else's server. An inset outline, so it cannot move the video by a pixel. */
+div.stream-box-click-armed::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2;
+	pointer-events: none;
+	outline: 3px solid var(--cs-key-holded-bg);
+	outline-offset: -3px;
+}
+
 div.stream-box-offline {
 	-webkit-filter: grayscale(100%) brightness(75%) sepia(75%);
 	filter: grayscale(100%) brightness(75%) sepia(75%);

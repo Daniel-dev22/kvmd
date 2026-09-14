@@ -51,6 +51,12 @@ export function setOnDown(el, cb, prevent_default=true) {
 // alongside for the rare case that needs the target (a control sitting on top
 // of the surface, say).
 //
+// The drag is latched to the finger that started it, by identifier. Reading
+// `touches[0]` instead looks equivalent and is not: a second finger anywhere on
+// the screen can take index 0, and the drag then jumps to it and ends wherever
+// IT happens to be. A second finger on the surface abandons the drag outright,
+// because a pinch is not a selection.
+//
 // Only the TOUCH defaults are prevented, and that is not a preference: without
 // it the browser replays the whole gesture as synthetic mouse events a moment
 // later, which starts a second drag and destroys the one just drawn -- and pans
@@ -61,33 +67,66 @@ export function setOnDown(el, cb, prevent_default=true) {
 // below: a gesture the system took away was never finished, and must not be
 // treated as though it were.
 export function setOnDrag(el, {onStart, onMove, onEnd, onCancel}) {
-	let wrap = (cb) => function(ev) {
+	let finger = null; // The identifier of the touch drawing right now
+
+	let point = function(ev, touches) {
+		if (ev.touches === undefined) {
+			return {"x": ev.clientX, "y": ev.clientY}; // A mouse
+		}
+		for (let touch of touches) {
+			if (touch.identifier === finger) {
+				return {"x": touch.clientX, "y": touch.clientY};
+			}
+		}
+		return null;
+	};
+
+	el.onmousedown = el.ontouchstart = function(ev) {
+		if (ev.touches !== undefined) {
+			ev.preventDefault();
+			if (finger !== null || ev.targetTouches.length > 1) {
+				finger = null;
+				onCancel();
+				return;
+			}
+			finger = ev.changedTouches[0].identifier;
+		}
+		let at = point(ev, ev.targetTouches);
+		if (at !== null) {
+			onStart(at, ev);
+		}
+	};
+
+	el.onmousemove = el.ontouchmove = function(ev) {
 		if (ev.touches !== undefined) {
 			ev.preventDefault();
 		}
-		let point = dragPoint(ev);
-		if (point !== null) {
-			cb(point, ev);
+		let at = point(ev, (ev.touches === undefined ? null : ev.targetTouches));
+		if (at !== null) {
+			onMove(at, ev);
 		}
 	};
-	el.onmousedown = el.ontouchstart = wrap(onStart);
-	el.onmousemove = el.ontouchmove = wrap(onMove);
-	el.onmouseup = el.ontouchend = wrap(onEnd);
+
+	el.onmouseup = el.ontouchend = function(ev) {
+		if (ev.touches !== undefined) {
+			ev.preventDefault();
+		}
+		// On a touchend the finger is gone from `touches` -- it is in
+		// `changedTouches`, which is the single most common way a touch port
+		// loses the last point of a drag.
+		let at = point(ev, (ev.touches === undefined ? null : ev.changedTouches));
+		if (at === null) {
+			return; // Some other finger lifted; this drag is still going
+		}
+		finger = null;
+		onEnd(at, ev);
+	};
+
 	el.ontouchcancel = function(ev) {
 		ev.preventDefault();
+		finger = null;
 		onCancel();
 	};
-}
-
-// Where the gesture is now, whichever device it came from. On a touchend the
-// finger is no longer in `touches` -- it is in `changedTouches`, which is the
-// single most common way a touch port loses the last point of a drag.
-export function dragPoint(ev) {
-	let src = ev;
-	if (ev.touches !== undefined) {
-		src = (ev.touches.length > 0 ? ev.touches[0] : ev.changedTouches[0]);
-	}
-	return (src === undefined || src === null ? null : {"x": src.clientX, "y": src.clientY});
 }
 
 export function setOnUp(el, cb, prevent_default=true) {
