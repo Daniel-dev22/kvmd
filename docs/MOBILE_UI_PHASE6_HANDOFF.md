@@ -3,7 +3,7 @@
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`), worktree
 `/docker_container_volumes/kvmd-mobile-first`.
 **Commits:** `2148b643` (the phase), `2d533147` (review fixes), `5f769faf` (a fix found by
-canarying the review fixes), `92909916` (the phone could not find the keyboard — see below).
+canarying the review fixes), `33cdb1a7` (the phone could not find the keyboard — see below).
 **Status:** committed and pushed. **NOT merged to `master`. Deployed to the kd appliance on
 2026-09-14** and used on a real phone, which produced the finding in §*Surprises* below.
 **Read first:** `MOBILE_UI_PHASE1/2/3/5_HANDOFF.md`. (Phase 4's document describes what Phase 5
