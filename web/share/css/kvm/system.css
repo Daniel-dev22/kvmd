@@ -24,3 +24,35 @@ div#system-menu {
 	min-width: min(420px, 100vw);
 	max-width: min(420px, 100vw);
 }
+
+
+/* =========================================================================
+   Compact: the actions come FIRST.
+
+   `• Keyboard` and `• Mouse` are the two controls a phone opens constantly --
+   they are the only way to reach the on-screen keyboard, the typing bar that
+   raises the phone's own IME, and the mouse pad -- and they sit in the LAST
+   row of this sheet, under a screenful of settings and three spoilers. On a
+   390x844 emulator that row lands at y=795; on a real phone, whose viewport is
+   shorter by the browser's own chrome, it is at or below the fold, and the
+   sheet has to be scrolled by someone who has no reason to believe there is
+   anything down there. Reported from a phone as "there is no button to pop up
+   the keyboard or open the mouse".
+
+   Same DOM, same order on desktop: only the compact layout reorders, which is
+   what `order` is for. Scoped to this menu deliberately -- it is the only one
+   whose actions are buried under settings; the others are mostly actions
+   already, and in MSD the buttons act on a choice made above them.
+
+   `.hidden` is `display: none !important`, so making this a flex container
+   cannot keep a closed sheet on screen.
+   ========================================================================= */
+
+:root[data-ui="mobile"] div#system-menu {
+	display: flex;
+	flex-direction: column;
+}
+
+:root[data-ui="mobile"] div#system-menu > div.buttons {
+	order: -1;
+}

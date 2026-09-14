@@ -3,13 +3,13 @@
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`), worktree
 `/docker_container_volumes/kvmd-mobile-first`.
 **Commits:** `2148b643` (the phase), `2d533147` (review fixes), `5f769faf` (a fix found by
-canarying the review fixes).
-**Status:** committed and pushed. **NOT merged to `master`. NOT deployed** — the deploy needs a
-human to authorise it (see *Deploying*). Nobody has held a phone with this on it.
+canarying the review fixes), `92909916` (the phone could not find the keyboard — see below).
+**Status:** committed and pushed. **NOT merged to `master`. Deployed to the kd appliance on
+2026-09-14** and used on a real phone, which produced the finding in §*Surprises* below.
 **Read first:** `MOBILE_UI_PHASE1/2/3/5_HANDOFF.md`. (Phase 4's document describes what Phase 5
 built; its title is misleading.)
 
-**214 tests, 214 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
+**216 tests, 216 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
 tox env, three consecutive clean runs. 16 in the new `gestures.test.mjs` (no browser), 34 in the new
 `touch.test.mjs` (real touchscreen, real mouse), 12 in `events.test.mjs`.
 
@@ -142,6 +142,25 @@ Four independent lenses against the frozen `2148b643`, then fixes, then canaries
 
 ## Surprises — the expensive ones
 
+**The first thing a phone said about this build was that it could not find the keyboard.** Not a
+gesture, not a latch: *"there is no button now to pop up android keyboard or open mouse in mobile
+view"*. Both buttons were there — `• Keyboard` and `• Mouse` are the LAST row of the System sheet,
+under a screenful of settings and three spoilers. 📏 On a 390×844 emulator that row lands at
+**y=795**; on a real phone, whose viewport is shorter by the browser's own chrome, it is at or below
+the fold, and the only way to it is scrolling a sheet nobody has a reason to scroll. In compact the
+sheet now puts its actions FIRST (`order: -1`, same DOM, desktop untouched).
+
+**This is Phase 5's change, surfaced by Phase 6's deploy**: before Phase 5 the mouse pad was forced
+open on every compact load and its header carried a keyboard button, so a phone always had one of
+the two on screen. Making the pad open on demand — which was right, it was eating the whole screen —
+left the System sheet as the only door, and nobody checked whether that door was visible.
+
+📏 **The test that now pins it went green against the broken layout at 390×640 on the first
+attempt.** This page has no hardware behind it, so its System sheet is SHORTER than a real device's
+and the buried row still fitted on screen. "It happens to fit" was the wrong property; the test
+asserts the actions come BEFORE the settings, which is true at any size and with any amount of
+hardware. Canaried at both sizes afterwards.
+
 **`mod` meant two different things, and four of the keys wearing it are not modifiers.** Found by
 asking what a tap on PrintScreen should do. If the tap cycle had shipped for every bulleted key, the
 phone would have lost the ability to send PrintScreen, Kana, NonConvert and Convert at all.
@@ -248,8 +267,10 @@ ansible-playbook pikvm/deploy_web_ui.yaml -e 'server_home=kdhome' -e 'pikvm_web_
 
 The play now deploys a **git export of `pikvm_web_ref`** (default `HEAD`) rather than the working
 tree, so nothing untracked can ride along — during this phase's review that checkout had four agents
-reading it and one mutating files. 📏 Verified standalone at `5f769faf`: 117 files, zero `.pug`.
-The play itself has been syntax-checked but **not run end to end since that change**.
+reading it and one mutating files. Run end to end on 2026-09-14 (`ok=19 changed=7 failed=0`,
+rootfs back to `ro`), and verified against the device rather than the exit code: **all 58 js/css/html
+files on the appliance match the branch by sha256**, and nginx serves the new `gestures.js` with the
+same hash.
 
 ⚠ `pacman -Syu` on the appliance reverts `/usr/share/kvmd/web`. The appliance runs **kvmd 4.213**
 while this branch is based on **v4.215**; the web UI is static and served straight off disk, so

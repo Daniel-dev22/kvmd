@@ -363,6 +363,90 @@ describe("a mouse keeps every button it had", {"skip": chromiumPath() ? false : 
 	});
 });
 
+describe("a phone can reach the keyboard and the mouse", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// Reported from a real phone, against the deployed build: "there is no
+	// button now to pop up android keyboard or open mouse in mobile view".
+	// Both buttons existed -- in the LAST row of the System sheet, under a
+	// screenful of settings and three spoilers, at or below the fold on a
+	// viewport shortened by the browser's own chrome. They were reachable only
+	// by scrolling a sheet nobody had a reason to scroll.
+	//
+	// This walks the whole path with a finger rather than measuring geometry,
+	// because the complaint was not that a rectangle was the wrong size.
+	for (const [width, height] of [[390, 640], [320, 568]]) {
+		test(`from the video to the typing bar and the pad, at ${width}x${height}`, async () => {
+			const pg = await open(width, {height});
+			const shut = await pg.eval(`({
+				"keyboard": document.getElementById("keyboard-window").classList.contains("hidden"),
+				"mouse": document.getElementById("mouse-window").classList.contains("hidden"),
+			})`);
+			assert.deepEqual(shut, {"keyboard": true, "mouse": true},
+				"neither window should be open before it is asked for");
+
+			await tap(pg, await pg.eval(centre("#system-dropdown .menu-button")));
+			const reach = await pg.eval(`(() => {
+				const menu = document.getElementById("system-menu");
+				const out = {"scrolled": menu.scrollTop, "open": !menu.classList.contains("hidden")};
+				for (const what of ["keyboard-window", "mouse-window"]) {
+					const el = document.querySelector('[data-wm-window-show="' + what + '"]');
+					const r = el.getBoundingClientRect();
+					const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+					out[what] = {
+						"firstScreenful": (r.top >= 0 && r.bottom <= window.innerHeight),
+						"topmost": (el === top || el.contains(top)),
+						"tall": Math.round(r.height),
+					};
+				}
+				// This page has no hardware behind it, so its System sheet is
+				// SHORTER than a real device's -- "it happens to fit" is not
+				// the property. The property is that the actions come before
+				// the settings, whatever is in them.
+				out.beforeSettings = (
+					document.querySelector('[data-wm-window-show="keyboard-window"]').getBoundingClientRect().top
+					< menu.querySelector("details").getBoundingClientRect().top
+				);
+				return out;
+			})()`);
+			assert.equal(reach.open, true, "the System sheet did not open");
+			assert.equal(reach.scrolled, 0, "the sheet had to be scrolled before this was measured");
+			assert.equal(reach.beforeSettings, true,
+				"the keyboard and the mouse are below the settings again: on a real device that is under the fold");
+			for (const what of ["keyboard-window", "mouse-window"]) {
+				assert.equal(reach[what].firstScreenful, true,
+					`${what} is not in the first screenful of the sheet: it has to be found by scrolling`);
+				assert.equal(reach[what].topmost, true, `${what} is covered by something else`);
+				assert.ok(reach[what].tall >= MIN_TARGET, `${what} is ${reach[what].tall}px tall`);
+			}
+
+			await tap(pg, await pg.eval(centre(`[data-wm-window-show="keyboard-window"]`)));
+			const typing = await pg.eval(`(() => {
+				const bar = document.getElementById("hid-type-input");
+				const r = bar.getBoundingClientRect();
+				const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+				return {
+					"open": !document.getElementById("keyboard-window").classList.contains("hidden"),
+					"barOnScreen": (r.height > 0 && r.bottom <= window.innerHeight),
+					"barTappable": (bar === top || bar.contains(top)),
+				};
+			})()`);
+			assert.equal(typing.open, true, "the Keyboard button did not open the keyboard");
+			assert.equal(typing.barOnScreen, true,
+				"the typing bar -- the only thing that raises the phone's own keyboard -- is not on screen");
+			assert.equal(typing.barTappable, true, "the typing bar is covered");
+
+			await tap(pg, await pg.eval(centre("#keyboard-window-mouse-button")));
+			const pad = await pg.eval(`(() => {
+				const el = document.getElementById("mouse-window");
+				return {"open": !el.classList.contains("hidden"),
+					"onScreen": el.getBoundingClientRect().bottom <= window.innerHeight + 1};
+			})()`);
+			await pg.close();
+			assert.equal(pad.open, true, "the keyboard header did not open the mouse pad");
+			assert.equal(pad.onScreen, true, "the mouse pad opened off the bottom of the screen");
+		});
+	}
+});
+
 describe("the host's screen takes a click from a finger", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
 	// want: how many HID events this gesture should produce. 0 means "nothing",
 	// and that case waits out the window rather than racing it.
