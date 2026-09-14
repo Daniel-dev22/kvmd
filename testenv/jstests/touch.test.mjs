@@ -108,6 +108,25 @@ const HID_START = `(() => {
 
 const HID_READ = `window.__hid`;
 
+// Waits for the events rather than sleeping a guessed number of milliseconds --
+// which is long enough on an idle machine and not on one running four browsers
+// at once. An expectation of NOTHING has to wait out the whole window, since
+// there is no event to wait for.
+async function hidSettled(pg, pg_want, ms = 2000) {
+	const until = Date.now() + ms;
+	do {
+		const seen = await pg.eval(HID_READ);
+		if (pg_want > 0 && seen.length >= pg_want) {
+			break;
+		}
+		await new Promise((done) => setTimeout(done, 50));
+	} while (Date.now() < until);
+	// A grace period, so an event that should NOT have followed still shows up
+	// in the assertion instead of being missed by a race.
+	await new Promise((done) => setTimeout(done, 150));
+	return pg.eval(HID_READ);
+}
+
 // The keyboard window is opened the way a user opens it, so the layout under
 // test is the one the window manager actually produces. It opens in typing
 // mode, where the scancode layers are put away and the phone's own keyboard
@@ -345,7 +364,9 @@ describe("a mouse keeps every button it had", {"skip": chromiumPath() ? false : 
 });
 
 describe("the host's screen takes a click from a finger", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
-	async function gesture(run, {width = 390, before = null} = {}) {
+	// want: how many HID events this gesture should produce. 0 means "nothing",
+	// and that case waits out the window rather than racing it.
+	async function gesture(run, {width = 390, before = null, want = 0} = {}) {
 		const pg = await open(width);
 		if (before !== null) {
 			await pg.eval(before);
@@ -353,19 +374,18 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 		await pg.eval(HID_START);
 		const box = await pg.eval(centre("#stream-box"));
 		await run(pg, box);
-		await new Promise((done) => setTimeout(done, 150));
-		const sent = await pg.eval(HID_READ);
+		const sent = await hidSettled(pg, want, (want > 0 ? 2000 : 1200));
 		await pg.close();
 		return sent.filter((what) => what.startsWith("mouse "));
 	}
 
 	test("a tap is a left click on the host", async () => {
-		assert.deepEqual(await gesture((pg, box) => tap(pg, box)),
+		assert.deepEqual(await gesture((pg, box) => tap(pg, box), {"want": 2}),
 			["mouse left down", "mouse left up"]);
 	});
 
 	test("a long press is a right click, sent when the finger lifts", async () => {
-		assert.deepEqual(await gesture((pg, box) => tap(pg, box, 650)),
+		assert.deepEqual(await gesture((pg, box) => tap(pg, box, 650), {"want": 2}),
 			["mouse right down", "mouse right up"]);
 	});
 
@@ -383,8 +403,7 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 		await pg.touch("touchMove", [{"x": box.x + 60, "y": box.y + 60}]);
 		const after_move = await pg.eval(classOf("#stream-box"));
 		await pg.touch("touchEnd", []);
-		await new Promise((done) => setTimeout(done, 150));
-		const sent = (await pg.eval(HID_READ)).filter((what) => what.startsWith("mouse "));
+		const sent = (await hidSettled(pg, 0, 1200)).filter((what) => what.startsWith("mouse "));
 		await pg.close();
 		assert.doesNotMatch(before_arm, /click-armed/, "nothing is promised before the threshold");
 		assert.match(armed.cls, /\bstream-box-click-armed\b/,
@@ -428,7 +447,7 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 			await pg.touch("touchStart", [thumb, {"x": box.x, "y": box.y, "id": 1}]);
 			await pg.touch("touchEnd", [{"x": box.x, "y": box.y, "id": 1}]);
 			await pg.touch("touchEnd", [thumb]);
-		});
+		}, {"want": 2});
 		assert.deepEqual(sent, ["mouse left down", "mouse left up"],
 			"the tap on the video is a plain left click, whatever else is on the glass");
 	});
@@ -462,9 +481,8 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 				"under": document.elementFromPoint(20, 100).id};
 		})()`);
 		await tap(pg, {"x": 20, "y": 100});
-		await new Promise((done) => setTimeout(done, 150));
+		const sent = (await hidSettled(pg, 0, 1200)).filter((what) => what.startsWith("mouse "));
 		const closed = await pg.eval(`document.getElementById("system-menu").classList.contains("hidden")`);
-		const sent = (await pg.eval(HID_READ)).filter((what) => what.startsWith("mouse "));
 		await pg.close();
 		assert.equal(open_menu.open, true, "the sheet has to be open for this to mean anything");
 		assert.equal(open_menu.under, "stream-box", "and the video has to be what the tap lands on");
@@ -486,8 +504,7 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 		const box = await pg.eval(centre("#stream-box"));
 		await tap(pg, box);
 		await tap(pg, box, 650);
-		await new Promise((done) => setTimeout(done, 150));
-		const sent = (await pg.eval(HID_READ)).filter((what) => what.startsWith("mouse "));
+		const sent = (await hidSettled(pg, 0, 1200)).filter((what) => what.startsWith("mouse "));
 		const still = await pg.eval(classOf(`#mouse-buttons [data-keypad-code="left"]`));
 		await pg.close();
 		assert.match(latched, /\bholded\b/, "the long press has to latch the pad button");
@@ -558,6 +575,21 @@ describe("text recognition works without a pointer", {"skip": chromiumPath() ? f
 		};
 		return true;
 	})()`;
+
+	// A fixed sleep is long enough on an idle machine and not on one running
+	// four browsers at once: this waits for the thing itself.
+	async function ocrRequests(pg, want, ms = 4000) {
+		const until = Date.now() + ms;
+		let urls = [];
+		do {
+			urls = await pg.eval(`window.__urls`);
+			if (ocrParams(urls).length >= want) {
+				break;
+			}
+			await new Promise((done) => setTimeout(done, 50));
+		} while (Date.now() < until);
+		return ocrParams(urls);
+	}
 
 	const ocrParams = (urls) => urls.filter((url) => url.includes("ocr=1")).map(function(url) {
 		const q = new URLSearchParams(url.split("?")[1]);
@@ -634,14 +666,12 @@ describe("text recognition works without a pointer", {"skip": chromiumPath() ? f
 		const at = await pg.eval(centre("#stream-ocr-confirm-button"));
 		await pg.mouse("mousePressed", at.x, at.y);
 		await pg.mouse("mouseReleased", at.x, at.y);
-		await new Promise((done) => setTimeout(done, 200));
+		const asked = await ocrRequests(pg, 1);
 		const m = await pg.eval(`({
-			"urls": window.__urls,
 			"closed": document.getElementById("stream-ocr-window").classList.contains("hidden"),
 		})`);
 		await pg.close();
 		assert.equal(drawn.w, want.w, "the box has to exist before the button can act on it");
-		const asked = ocrParams(m.urls);
 		assert.equal(asked.length, 1, `Recognize issued ${asked.length} OCR requests, not one`);
 		assert.ok(asked[0].left < asked[0].right && asked[0].top < asked[0].bottom,
 			`the region is inside out: ${JSON.stringify(asked[0])}`);
@@ -666,17 +696,25 @@ describe("text recognition works without a pointer", {"skip": chromiumPath() ? f
 			const button = await pg.eval(centre("#stream-ocr-confirm-button"));
 			await pg.mouse("mousePressed", button.x, button.y);
 			await pg.mouse("mouseReleased", button.x, button.y);
-			await new Promise((done) => setTimeout(done, 150));
+			await ocrRequests(pg, (shift > 0 ? 2 : 1));
 			// There is no kvmd behind this page, so the recognition fails and
 			// wm.error puts a modal over everything -- including the overlay
-			// the next drag needs. Dismissing it is part of the real flow.
-			await pg.eval(`(() => {
-				const ok = document.querySelector(".modal-window button");
-				if (ok !== null) { ok.click(); }
-				return true;
+			// the next drag needs. Dismissing it is part of the real flow, and
+			// it has to be waited for: the modal appears when the request
+			// FAILS, which is after the request was made.
+			await pg.eval(`(async () => {
+				for (let i = 0; i < 60; i++) {
+					const ok = document.querySelector(".modal-window button");
+					if (ok !== null) {
+						ok.click();
+						return true;
+					}
+					await new Promise((done) => setTimeout(done, 50));
+				}
+				throw new Error("the error modal never appeared, so the next drag would land on it");
 			})()`);
 		}
-		const asked = ocrParams(await pg.eval(`window.__urls`));
+		const asked = await ocrRequests(pg, 2);
 		await pg.close();
 		assert.equal(asked.length, 2, "both selections had to be recognised");
 		assert.ok(asked[1].left > asked[0].left && asked[1].right > asked[0].right,
@@ -699,13 +737,12 @@ describe("text recognition works without a pointer", {"skip": chromiumPath() ? f
 			await pg.touch("touchEnd", []);
 			const at = await pg.eval(centre(`#${button}`));
 			await tap(pg, at);
-			await new Promise((done) => setTimeout(done, 200));
+			const asked = await ocrRequests(pg, Math.max(want_urls, 1), (want_urls === 0 ? 1000 : 4000));
 			const m = await pg.eval(`({
-				"urls": window.__urls,
 				"closed": document.getElementById("stream-ocr-window").classList.contains("hidden"),
 			})`);
 			await pg.close();
-			assert.equal(ocrParams(m.urls).length, want_urls, `${name} asked for the wrong thing`);
+			assert.equal(asked.length, want_urls, `${name} asked for the wrong thing`);
 			assert.equal(m.closed, true, `${name} left the overlay open`);
 		}
 	});
@@ -730,6 +767,37 @@ describe("text recognition works without a pointer", {"skip": chromiumPath() ? f
 			{"w": second.w, "h": second.h, "x": second.x, "y": second.y},
 			{"w": want.w, "h": want.h, "x": want.from.x, "y": want.from.y},
 			"the second box was anchored to the first drag's corner");
+	});
+
+	test("a drag that ENDS on the buttons is the box that gets recognised", async () => {
+		// The release over a control used to be dropped, so the box on screen
+		// and the region in __sel disagreed: the user drew a new rectangle,
+		// pressed Recognize, and got the text from the PREVIOUS one.
+		const region = async function(redraw) {
+			const pg = await open(1280, {"touch": false, "height": 900});
+			await pg.eval(SPY);
+			await pg.eval(OPEN);
+			const at = await pg.eval(centre("#stream-box"));
+			const button = await pg.eval(centre("#stream-ocr-confirm-button"));
+			await mouseDrag(pg,
+				{"x": Math.round(at.x - 200), "y": Math.round(at.y - 100)},
+				{"x": Math.round(at.x - 120), "y": Math.round(at.y - 40)});
+			if (redraw) {
+				// The second box ends ON the button, which is where a downward
+				// drag towards it naturally finishes.
+				await mouseDrag(pg, {"x": Math.round(at.x + 40), "y": Math.round(at.y)}, button);
+			}
+			await pg.mouse("mousePressed", button.x, button.y);
+			await pg.mouse("mouseReleased", button.x, button.y);
+			const asked = await ocrRequests(pg, 1);
+			await pg.close();
+			assert.equal(asked.length, 1, `${redraw ? "two boxes" : "one box"}: expected exactly one request`);
+			return asked[0];
+		};
+		const first_only = await region(false);
+		const redrawn = await region(true);
+		assert.ok(redrawn.left > first_only.left && redrawn.top > first_only.top,
+			`Recognize used a box the user had replaced: ${JSON.stringify({first_only, redrawn})}`);
 	});
 
 	test("a cancelled drag leaves no selection behind", async () => {

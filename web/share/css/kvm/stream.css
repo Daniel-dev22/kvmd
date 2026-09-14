@@ -61,6 +61,14 @@ div#stream-ocr-controls button {
 	min-width: 44px;
 	padding: 0 16px;
 }
+/* These buttons sit on top of the surface the user is drawing on, and an
+   engine SWALLOWS the events over a disabled control rather than passing them
+   down -- so a drag that ended on the greyed-out Recognize button lost its
+   release, and with it the whole selection. Hit-testing straight through is
+   what a control that cannot be used should do anyway. */
+div#stream-ocr-controls button:disabled {
+	pointer-events: none;
+}
 
 div#stream-ocr-selection {
 	position: relative;
