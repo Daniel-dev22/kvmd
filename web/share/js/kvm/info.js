@@ -25,7 +25,6 @@
 
 import {ROOT_PREFIX} from "../vars.js";
 import {tools, $} from "../tools.js";
-import {UI_MOBILE} from "../ui.js";
 import {webtermUrl} from "./webterm.js";
 
 
@@ -256,12 +255,7 @@ export function Info() {
 			let loc = window.location;
 			let base = `${loc.protocol}//${loc.host}${loc.pathname}${ROOT_PREFIX}`;
 			show_hook = function() {
-				// Read at OPEN time, not at load: the layout can change while
-				// the page is up, and the terminal is not reloaded to follow it
-				// -- that would drop the shell.
-				let compact = (document.documentElement.getAttribute("data-ui") === UI_MOBILE);
-				let url = webtermUrl(base, state.webterm.path,
-					(compact ? window.innerWidth : null));
+				let url = webtermUrl(base, state.webterm.path);
 				tools.info("Terminal opened: ", url);
 				$("webterm-iframe").src = url;
 			};

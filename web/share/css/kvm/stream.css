@@ -177,3 +177,45 @@ canvas#stream-canvas {
 :root[data-ui="mobile"] div#mouse-window button[data-wm-window-close] {
 	display: none;
 }
+
+
+
+/* =========================================================================
+   The terminal, zoomed.
+
+   ttyd's terminal is somebody else's application in an iframe, and the only
+   thing we can ask it for is a font size on its URL. It reads one -- the
+   parser is right there in the build on the appliance -- but it was reported
+   twice from a phone as having no effect, and nothing this side of the iframe
+   can prove otherwise.
+
+   `zoom` needs nothing from ttyd: it is applied here, to the element. The
+   terminal is handed a viewport of half the width, lays itself out for THAT,
+   and every pixel it draws comes out twice the size -- its own font, its
+   scrollbar, its cursor. 📏 On a 390px phone the terminal sees 195px, which at
+   xterm's default 15px is about 21 columns, drawn at an effective 30px.
+
+   The width compensates for the zoom so the iframe still fills its window: a
+   percentage resolves against the unzoomed parent and the result is then
+   scaled, so 50% of the window renders as 100% of it.
+   ========================================================================= */
+
+div#webterm-window iframe {
+	width: 100%;
+	flex: 1;
+	border: none;
+}
+
+:root[data-ui="mobile"] div#webterm-window {
+	--webterm-zoom: 2;
+}
+
+:root[data-ui="mobile"] div#webterm-window iframe {
+	zoom: var(--webterm-zoom);
+	width: 100%;
+	/* The window is a flex column: let it hand the iframe the space that is
+	   left, rather than a percentage of a box that zoom has already scaled. */
+	height: auto;
+	flex: 1;
+	align-self: stretch;
+}

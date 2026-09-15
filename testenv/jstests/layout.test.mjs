@@ -597,3 +597,53 @@ describe("the launcher offers everything it has on one row", {"skip": chromiumPa
 		});
 	}
 });
+
+describe("the terminal is zoomed for a phone, and only for a phone", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// The source test in webterm.test.mjs says the rule exists. This says what
+	// it DOES: the terminal is handed half the viewport, lays itself out for
+	// that, and every pixel it draws comes out twice the size -- the terminal's
+	// own font, its cursor, its scrollbar. Asking ttyd for a font size was
+	// tried instead and reported twice from the phone as having no effect.
+	const OPEN = `(async () => {
+		const win = document.getElementById("webterm-window");
+		win.classList.remove("hidden");
+		const frame = document.getElementById("webterm-iframe");
+		// Same origin, so the viewport the terminal would get is readable.
+		frame.src = "/share/svg/logo.svg";
+		await new Promise((done) => {
+			frame.onload = done;
+			setTimeout(done, 2000);
+		});
+		const box = frame.getBoundingClientRect();
+		const outer = win.getBoundingClientRect();
+		return {
+			"rendered": Math.round(box.width),
+			"tall": Math.round(box.height),
+			"window": Math.round(outer.width),
+			"inner": (frame.contentWindow === null ? null : frame.contentWindow.innerWidth),
+			"zoom": getComputedStyle(frame).zoom,
+		};
+	})()`;
+
+	test("a phone gets half the viewport at twice the size", async () => {
+		const pg = await open("web/kvm/index.html", 390, 700);
+		const m = await pg.eval(OPEN);
+		await pg.close();
+		assert.equal(m.zoom, "2", "the iframe is not zoomed");
+		assert.ok(m.rendered >= m.window - 10,
+			`the terminal fills ${m.rendered}px of a ${m.window}px window -- the zoom shrank its box`);
+		assert.ok(m.tall > 100, `the terminal is ${m.tall}px tall`);
+		assert.ok(Math.abs(m.inner - m.rendered / 2) <= 2,
+			`the terminal sees ${m.inner}px inside a ${m.rendered}px box: that is not a 2x zoom`);
+	});
+
+	test("the desktop terminal is left alone", async () => {
+		const pg = await open("web/kvm/index.html", 1280, 900, false);
+		const m = await pg.eval(OPEN);
+		await pg.close();
+		assert.equal(m.zoom, "1", "the desktop terminal must not be zoomed");
+		assert.equal(m.inner, m.rendered,
+			`the desktop terminal sees ${m.inner}px inside a ${m.rendered}px box`);
+	});
+});
+

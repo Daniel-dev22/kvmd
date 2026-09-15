@@ -19,47 +19,27 @@
 #                                                                            #
 *****************************************************************************/
 
-// ttyd merges the URL query over its own options AND the server's, and a key it
-// does not recognise falls through to xterm's own options -- so this is how the
-// terminal's font size is set from out here, with no ttyd flag and no reload
-// (ttyd 1.7.7, html/src/components/terminal/xterm/index.ts:
-// parseOptsFromUrlQuery, spread LAST into applyPreferences; the default branch
-// assigns terminal.options[key]. src/protocol.c sends SET_PREFERENCES on every
-// connect, so that path always runs).
+// The terminal is somebody else's application in an iframe, and the size of its
+// type is NOT set from here.
+//
+// ttyd does read options off its URL -- `fontSize` included; the parser is in
+// the build running on the appliance -- and that was tried first, at 18px and
+// then at 30px. Both were reported from the phone as having no effect, and
+// nothing this side of the iframe can prove otherwise: the query has to survive
+// kvmd's proxying, the redirect to login, and ttyd's own websocket handshake
+// before it means anything. A knob that cannot be verified is not a knob.
+//
+// What replaced it is `zoom` on the iframe, in kvm/stream.css, which needs
+// nothing from ttyd: the terminal is handed half the viewport, lays itself out
+// for that, and every pixel it draws comes out twice the size. See the comment
+// there for the measurement.
 
 "use strict";
 
 
-// How many columns a phone terminal gives up in exchange for type you can read.
-// 📏 Chosen ON THE DEVICE, which is the only place this can be chosen: 30
-// columns (22px on a 390px phone) was still reported as too small, so the trade
-// moved -- 22 columns is 30px there, and a command longer than that wraps.
-// Lower it if a phone says the type is still small; that is the one knob.
-export const WEBTERM_COLUMNS = 22;
-
-// xterm's own default is 15px -- 43 columns on a 390px phone, and too small to
-// read at arm's length. The floor is what makes the change visible at all; the
-// ceiling stops a tablet from getting a font meant for a watch.
-export const WEBTERM_FONT_MIN_PX = 18;
-export const WEBTERM_FONT_MAX_PX = 30;
-
-// The advance width of a monospace glyph, in em. DejaVu Sans Mono -- what these
-// browsers fall back to -- is 0.602; every common terminal face is near enough
-// that a column count derived from it is out by less than one column.
-const CHAR_ASPECT = 0.6;
-
-
-export function webtermFontSize(width_px) {
-	let size = Math.round(width_px / (WEBTERM_COLUMNS * CHAR_ASPECT));
-	return Math.min(Math.max(size, WEBTERM_FONT_MIN_PX), WEBTERM_FONT_MAX_PX);
-}
-
-
-// width_px is the width the terminal has to live in, or null for a desktop,
-// which keeps the terminal's own default.
-export function webtermUrl(base, path, width_px) {
+export function webtermUrl(base, path) {
 	// The trailing slash avoids an Nginx 301 when the location has none, which
 	// a reverse proxy in front of PiKVM can be misconfigured to mishandle.
-	let url = base + path + "/?disableLeaveAlert=true";
-	return (width_px === null ? url : `${url}&fontSize=${webtermFontSize(width_px)}`);
+	// disableLeaveAlert stops ttyd asking "are you sure?" on every navigation.
+	return base + path + "/?disableLeaveAlert=true";
 }
