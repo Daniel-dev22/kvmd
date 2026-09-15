@@ -739,10 +739,31 @@ describe("the console is already zoomed when a phone opens it", {"skip": chromiu
 		const on_desk = await desk.eval(PICTURE);
 		await desk.close();
 
-		assert.match(on_phone.transform, /^matrix\(2,/,
+		assert.match(on_phone.transform, /^matrix\(2\.5,/,
 			`the console opened at ${on_phone.transform} on a phone`);
-		assert.equal(on_phone.label, "200%", "the setting has to say what it did");
+		assert.equal(on_phone.label, "250%", "the setting has to say what it did");
 		assert.equal(on_desk.transform, "none", "the desktop console must not be zoomed");
+	});
+
+	test("a phone that has already chosen a zoom keeps it", async () => {
+		// The slider writes its default to storage on the first load, so the
+		// stored value -- not the constant -- is what a returning phone gets.
+		const pg = await browser.newPage();
+		await pg.setViewport(390, 844, true);
+		await pg.setTouch(true, 5);
+		await pg.clearStorage(server.origin);
+		await pg.goto(`${server.origin}/${KVM}`);
+		await pg.eval(`(() => {
+			localStorage.setItem("stream.zoom", "1.25");
+			localStorage.setItem("stream.zoom.bumped", "1");
+			return true;
+		})()`);
+		await pg.goto(`${server.origin}/${KVM}`);
+		const m = await pg.eval(PICTURE);
+		await pg.close();
+		assert.match(m.transform, /^matrix\(1\.25,/,
+			`a stored 125% opened at ${m.transform} -- the setting is not being read`);
+		assert.equal(m.label, "125%");
 	});
 
 	test("two fingers zoom further and pan, and neither reaches the host", async () => {

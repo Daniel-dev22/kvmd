@@ -567,8 +567,17 @@ describe("the sections are a grid behind one button", {"skip": chromiumPath() ? 
 		})()`);
 		await pg.touch("touchStart", [at]);
 		await pg.touch("touchEnd", []);
-		const m = await pg.eval(`(() => {
-			const sheet = document.getElementById("system-menu").getBoundingClientRect();
+		// Wait for the sheet rather than reading the frame the tap landed in:
+		// on a loaded machine the layout has not settled by the next evaluate,
+		// and a sheet measured mid-open is indistinguishable from one that
+		// opened where nobody can see it -- which is the defect this guards.
+		const m = await pg.eval(`(async () => {
+			const el = document.getElementById("system-menu");
+			for (let i = 0; i < 40; i++) {
+				if (el.getBoundingClientRect().height > 100) { break; }
+				await new Promise((done) => setTimeout(done, 50));
+			}
+			const sheet = el.getBoundingClientRect();
 			return {
 				"gridOpen": document.getElementById("navbar").classList.contains("navbar-sections-open"),
 				"sheetW": Math.round(sheet.width), "sheetH": Math.round(sheet.height),

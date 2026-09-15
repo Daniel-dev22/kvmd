@@ -40,6 +40,11 @@ const CLICK_MS = 50;
 // on the host, and a gesture must not interfere with one.
 const BUTTONS = ["left", "middle", "right", "up", "down"];
 
+// Where a phone's console view starts, and the default it replaced -- see the
+// migration in __init__ for why the old one has to be named.
+const ZOOM_COMPACT_DEFAULT = 2.5;
+const ZOOM_COMPACT_SUPERSEDED = 2;
+
 
 export function Mouse(__getGeometry, __recordWsEvent) {
 	var self = this;
@@ -72,8 +77,22 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 		// Where the view starts on every load. A phone cannot read a 1920x1080
 		// console at 1x -- 4.8px per character -- and zooming in by hand after
-		// every page load is not a thing anyone should have to do.
-		tools.storage.bindSimpleSlider($("stream-zoom-slider"), "stream.zoom", ZOOM_MIN, ZOOM_MAX, 0.25, 2, function(value) {
+		// every page load is not a thing anyone should have to do. 250% was
+		// chosen ON A PHONE; it is the one number here that cannot be derived.
+		//
+		// bindSimpleSlider writes its default to storage on the FIRST load, so
+		// raising the default alone reaches nobody who has already opened the
+		// page: their phone is holding the old one. Anyone still sitting on
+		// exactly the superseded default is carried forward with it, once.
+		if (
+			Number(tools.storage.get("stream.zoom", ZOOM_COMPACT_DEFAULT)) === ZOOM_COMPACT_SUPERSEDED
+			&& !tools.storage.getBool("stream.zoom.bumped", false)
+		) {
+			tools.storage.set("stream.zoom", ZOOM_COMPACT_DEFAULT);
+		}
+		tools.storage.setBool("stream.zoom.bumped", true);
+
+		tools.storage.bindSimpleSlider($("stream-zoom-slider"), "stream.zoom", ZOOM_MIN, ZOOM_MAX, 0.25, ZOOM_COMPACT_DEFAULT, function(value) {
 			$("stream-zoom-value").innerText = `${Math.round(value * 100)}%`;
 			__resetZoom(value);
 		});
