@@ -3,13 +3,14 @@
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`), worktree
 `/docker_container_volumes/kvmd-mobile-first`.
 **Commits:** `2148b643` (the phase), `2d533147` (review fixes), `5f769faf` (a fix found by
-canarying the review fixes), `33cdb1a7` and `af301512` (what the phone said — see below).
+canarying the review fixes), `33cdb1a7`, `af301512`, `9fad1246`, `18776fad` (what the phone
+said — see below).
 **Status:** committed and pushed. **NOT merged to `master`. Deployed to the kd appliance on
 2026-09-14** and used on a real phone, which produced the finding in §*Surprises* below.
 **Read first:** `MOBILE_UI_PHASE1/2/3/5_HANDOFF.md`. (Phase 4's document describes what Phase 5
 built; its title is misleading.)
 
-**219 tests, 219 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
+**227 tests, 227 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
 tox env, three consecutive clean runs. 16 in the new `gestures.test.mjs` (no browser), 34 in the new
 `touch.test.mjs` (real touchscreen, real mouse), 12 in `events.test.mjs`.
 
@@ -204,7 +205,11 @@ looking for. A 2.3-second test passed for free before I caught it.
 
 **A `git checkout --` revert inside the canary loop discarded an uncommitted fix**, and the next full
 run failed in a way that looked exactly like the defect the test existed to catch. Commit before
-canarying, or revert from a copy.
+canarying, or revert from a copy. 📏 Twice more, the same family: a canary whose suite run **timed
+out** never reached its restore, and one **killed from outside** stopped between mutate and restore —
+both left the mutation in the working tree, where the next run reads as a regression. Put the restore
+in a `finally`, and expect a loaded machine: this one was at **load 10.5 on 8 cores** with three
+large processes that were not mine, and a 60-second suite took longer than a 900-second timeout.
 
 ---
 
@@ -296,6 +301,30 @@ same hash.
 while this branch is based on **v4.215**; the web UI is static and served straight off disk, so
 nothing is restarted and no session is interrupted, but that version gap has not been audited for
 API drift.
+
+### The navbar became one button and a grid
+
+Option C+D of a measured options page, chosen by the owner. 📏 The strip was **815px on a 390px
+screen** with a Switch attached — 425px (52%) past the right edge, 495px (61%) at 320px, ATX (the
+fourth item) starting at x=376. Seven of nine items were never seen. The bar is now identity, status
+and one button; the sections are tiles in a grid, **with Keyboard and Mouse among them**. 152 lines
+of strip machinery went with it — the scroll container, the named scroll timeline, both edge-fade
+pseudo-elements and the eight `order` values.
+
+Two defects found while building it, both invisible to a class-based check and both now tested:
+every section's sheet is a **descendant of the grid container**, so hiding that container hid the
+sheets too (choosing System opened a sheet nobody could see); and with the tiles merely hidden the
+container still stood **152px tall over the video**, invisible and eating every tap on it.
+
+### Two more the phone asked for
+
+- **The launcher** put KVM and Terminal on one row and wrapped Logout onto a second, at 390 *and*
+  320px. The three tiles share a row now, down to the narrowest phone.
+- **The terminal** opens at `fontSize=18` on a phone. ttyd 1.7.7 merges the URL query over its own
+  options and the server's, and an unrecognised key falls through to xterm's own — so the size is
+  set from the iframe URL with no ttyd flag and no reload of a live shell. 15px (xterm's default) is
+  43 columns of unreadable type at 390px; 18px is about 36 legible ones. Read at OPEN time, because
+  the layout can change while the page is up and reloading the terminal would drop the shell.
 
 📏 **Four defects came from one phone in one sitting, none of which any lens or any measurement had
 found**, and three of them were Phase 5's. Two were invisible to this suite because the test page has
