@@ -29,6 +29,7 @@ import {wm} from "../wm.js";
 import {Keypad} from "../keypad.js";
 import {TouchGestures} from "../gestures.js";
 import {makeZoom, ZOOM_MIN, ZOOM_MAX} from "./zoom.js";
+import {changedRegion, shouldFollow, followPan, FOLLOW_COLS, FOLLOW_ROWS, FOLLOW_HZ, FOLLOW_MANUAL_HOLD_MS} from "./follow.js";
 
 
 // A real click has a duration. It also makes the on-screen Left button visibly
@@ -95,6 +96,22 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		tools.storage.bindSimpleSlider($("stream-zoom-slider"), "stream.zoom", ZOOM_MIN, ZOOM_MAX, 0.25, ZOOM_COMPACT_DEFAULT, function(value) {
 			$("stream-zoom-value").innerText = `${Math.round(value * 100)}%`;
 			__resetZoom(value);
+		});
+
+		tools.storage.bindSimpleSwitch($("stream-follow-switch"), "stream.follow", true, function(value) {
+			if (value) {
+				__followStart();
+			} else {
+				__followStop();
+			}
+		});
+		// Sampling a video nobody is looking at is pure battery on a phone.
+		document.addEventListener("visibilitychange", function() {
+			if (document.hidden) {
+				__followStop();
+			} else if ($("stream-follow-switch").checked) {
+				__followStart();
+			}
 		});
 
 		__gestures = new TouchGestures({
@@ -306,12 +323,121 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	// The picture, moved and scaled. Not the box: the overlays inside it are
 	// positioned in the box's own coordinates and would be dragged off with it.
-	var __applyZoom = function() {
+	var __applyZoom = function(smooth=false) {
 		let z = __zoom.get();
 		let css = (z.scale === ZOOM_MIN ? "" : `translate(${Math.round(z.x)}px, ${Math.round(z.y)}px) scale(${z.scale})`);
 		for (let id of ["stream-image", "stream-video", "stream-canvas"]) {
-			$(id).style.transform = css;
+			let el = $(id);
+			// A gesture must track the fingers exactly, so only the follower --
+			// which moves the view on its own -- gets an animation.
+			el.style.transition = (smooth ? "transform 180ms ease-out" : "");
+			el.style.transform = css;
 		}
+	};
+
+	// ======================= following the action =======================
+	//
+	// See follow.js for why the changing region is the right thing to chase.
+	// This half is the sampling: the caller has the video element, the box and
+	// the zoom, and none of that belongs in the arithmetic.
+
+	var __follow_ctx = null;
+	var __follow_prev = null;
+	var __follow_timer = null;
+	var __follow_manual_ts = 0;
+	var __follow_broken = false;
+
+	// The one stream element actually on screen. Which of the three it is
+	// depends on the mode (mjpeg/janus/media), and a video that has not got a
+	// frame yet cannot be drawn from at all.
+	var __followElement = function() {
+		for (let id of ["stream-image", "stream-video", "stream-canvas"]) {
+			let el = $(id);
+			if (el === null || !tools.hidden.isVisible(el)) {
+				continue;
+			}
+			if (el.tagName === "VIDEO" && el.readyState < 2) {
+				continue;
+			}
+			let w = (el.naturalWidth || el.videoWidth || el.width || 0);
+			let h = (el.naturalHeight || el.videoHeight || el.height || 0);
+			if (w > 0 && h > 0) {
+				return el;
+			}
+		}
+		return null;
+	};
+
+	var __followTick = function() {
+		let z = __zoom.get();
+		let el = __followElement();
+		if (el === null || z.scale <= ZOOM_MIN || document.hidden) {
+			// Nothing to compare the next frame against: a sample taken before
+			// a gap would report everything that happened during it as one
+			// enormous change.
+			__follow_prev = null;
+			return;
+		}
+		if (Date.now() - __follow_manual_ts < FOLLOW_MANUAL_HOLD_MS) {
+			__follow_prev = null;
+			return;
+		}
+
+		let now = null;
+		try {
+			__follow_ctx.drawImage(el, 0, 0, FOLLOW_COLS, FOLLOW_ROWS);
+			now = __follow_ctx.getImageData(0, 0, FOLLOW_COLS, FOLLOW_ROWS).data;
+		} catch (ex) {
+			// A tainted canvas or an element that cannot be drawn from will not
+			// start working on the next tick, so stop rather than fail five
+			// times a second for the rest of the session.
+			__follow_broken = true;
+			__followStop();
+			tools.error("Stream: cannot follow the console:", ex);
+			return;
+		}
+
+		if (__follow_prev !== null) {
+			let region = changedRegion(__follow_prev, now, FOLLOW_COLS, FOLLOW_ROWS);
+			if (shouldFollow(region, z.scale)) {
+				let box = $("stream-box").getBoundingClientRect();
+				__zoom.setViewport(box.width, box.height);
+				let move = followPan({
+					"view": z, "region": region,
+					"viewport": {"width": box.width, "height": box.height},
+				});
+				if (move.dx !== 0 || move.dy !== 0) {
+					__zoom.pan(move.dx, move.dy);
+					__applyZoom(true);
+				}
+			}
+		}
+		__follow_prev = now;
+	};
+
+	var __followStart = function() {
+		if (__follow_timer !== null || __follow_broken) {
+			return;
+		}
+		if (document.documentElement.getAttribute("data-ui") !== UI_MOBILE) {
+			return; // Desktop shows the whole picture; there is nothing to chase
+		}
+		if (__follow_ctx === null) {
+			let canvas = document.createElement("canvas");
+			canvas.width = FOLLOW_COLS;
+			canvas.height = FOLLOW_ROWS;
+			__follow_ctx = canvas.getContext("2d", {"willReadFrequently": true});
+		}
+		__follow_prev = null;
+		__follow_timer = setInterval(__followTick, Math.round(1000 / FOLLOW_HZ));
+	};
+
+	var __followStop = function() {
+		if (__follow_timer !== null) {
+			clearInterval(__follow_timer);
+			__follow_timer = null;
+		}
+		__follow_prev = null;
 	};
 
 	var __resetZoom = function(scale) {
@@ -319,10 +445,15 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		__zoom.setViewport(box.width, box.height);
 		__zoom.reset();
 		if (document.documentElement.getAttribute("data-ui") === UI_MOBILE && scale > ZOOM_MIN) {
-			// Anchored at the top-left, where a console's prompt is.
+			// Anchored at the top-left, which is where a console's prompt is
+			// until enough output has pushed it off the bottom -- from there
+			// the follower is what keeps it in view.
 			__zoom.pinch(scale, {"x": 0, "y": 0});
 		}
 		__applyZoom();
+		// A deliberate choice of view, and the stream's first frames after one
+		// change everything at once; both are worth staying out of.
+		__follow_manual_ts = Date.now();
 	};
 
 	// Where a touch is on the PICTURE, which is what the host is told about. At
@@ -372,6 +503,8 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 				__zoom.pan(now.x - __pinch.x, now.y - __pinch.y);
 				__zoom.pinch(now.dist / __pinch.dist, {"x": now.x - rect.left, "y": now.y - rect.top});
 				__applyZoom();
+				// They have just said where they want to look.
+				__follow_manual_ts = Date.now();
 			}
 			__pinch = now;
 			__abs_pos = null;

@@ -105,6 +105,14 @@ li.right#system-dropdown
 				tr
 					td Zoom the console by:
 					td.slider #[+menu_slider("stream-zoom-slider", "stream-zoom-value")]
+				//- Zoomed in, the prompt walks out of the bottom of the box
+				//- after enough output and you are typing blind. Nothing can be
+				//- asked where the cursor is -- there is only video -- so the
+				//- view follows whatever is CHANGING, which at an idle shell is
+				//- the blinking cursor itself.
+				tr
+					td Keep the cursor in view:
+					td #[+menu_switch("stream-follow-switch", true, true)]
 			table.kv
 				tr
 					td FPS limit:
