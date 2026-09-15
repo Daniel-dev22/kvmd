@@ -390,7 +390,11 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		await pg.commit("aaa");
 		await pg.commit("bbb");
 		await pg.eval(`document.getElementById("hid-mute-switch").checked = true`);
-		const host = await hostSettled(pg, 1, 1800);
+		// Waits for the SECOND print it must never see. Stopping at the first
+		// returns before the second could have completed, so the assertion
+		// passed whether or not the mute was honoured -- 📏 the mutation that
+		// drops the check survived this test until it waited out the window.
+		const host = await hostSettled(pg, 2, 2500);
 		await pg.close();
 		assert.equal(typed(host), "aaa", `a muted HID received: ${JSON.stringify(host)}`);
 	});
