@@ -62,6 +62,23 @@ export const FOLLOW_ROWS = 45;
 
 // How often to look. A cursor blinks at about 1Hz, so this only has to be fast
 // enough not to miss it, and slow enough not to cost battery on a phone.
+//
+// 📏 What a sample costs (draw + read back + diff), desktop Chromium, with the
+// source MUTATED every iteration so nothing upstream can be reused:
+//
+//     320x240   0.068 ms     1280x720   0.19 ms
+//     640x480   0.173 ms     1920x1080  0.424 ms
+//
+// ⚠ An earlier note here claimed 0.05 ms. That was measured against a small
+// STATIC source, so it timed the readback and the 3600-cell loop and never the
+// downscale -- which is the part that scales with source area, and the real
+// case is 1080p. The true figure is ~8x larger, and a phone is several times
+// slower again: budget a few percent of a core while zoomed. That is why every
+// "not now" test in the tick happens BEFORE the sample.
+//
+// The lever, if it ever matters: sample when a new frame actually arrived
+// (requestVideoFrameCallback for janus, load ticks for mjpeg) instead of on a
+// wall clock, which at 5Hz over a 30fps stream re-measures unchanged frames.
 export const FOLLOW_HZ = 5;
 
 // Per-cell change threshold, summed over R+G+B. Below this is JPEG noise: an
