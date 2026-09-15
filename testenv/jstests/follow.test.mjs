@@ -60,7 +60,13 @@ test("JPEG noise is not a change", () => {
 		b[p] = 5; b[p + 1] = 5; b[p + 2] = 5;   // 15 summed, under the threshold
 	}
 	assert.equal(changedRegion(a, b, 8, 4), null);
-	assert.ok(15 < FOLLOW_CELL_DELTA, "the noise floor must sit under the threshold");
+	// Both sides, or a build with the threshold raised 8x passes: a cell just
+	// over it must register.
+	const over = Math.ceil((FOLLOW_CELL_DELTA + 3) / 3);
+	const loud = frame(8, 4);
+	loud[0] = loud[1] = loud[2] = over;
+	assert.notEqual(changedRegion(a, loud, 8, 4), null,
+		`${over * 3} over black must register against a threshold of ${FOLLOW_CELL_DELTA}`);
 });
 
 // ---- deciding whether to move ----
@@ -87,7 +93,19 @@ test("a repaint is not a cursor", () => {
 	const r = changedRegion(frame(8, 4), frame(8, 4, cells), 8, 4);
 	assert.equal(r.fraction, 1);
 	assert.equal(shouldFollow(r, 2.5, 8, 4), false);
-	assert.ok(FOLLOW_MAX_FRACTION < 1);
+
+	// A REALISTIC repaint, not a whole-screen one: half the rows changing is a
+	// scroll or a window opening and must still be refused. `fraction < 1` as
+	// the only assertion let the cap move from 0.2 to 0.9 unnoticed.
+	const half = [];
+	for (let y = 0; y < 2; y += 1) {
+		for (let x = 0; x < 8; x += 1) {
+			half.push([x, y]);
+		}
+	}
+	const wide = changedRegion(frame(8, 4), frame(8, 4, half), 8, 4);
+	assert.equal(wide.fraction, 0.5);
+	assert.equal(shouldFollow(wide, 2.5, 8, 4), false, "half the screen changing is not a cursor");
 });
 
 // ---- where to move to ----
@@ -141,16 +159,25 @@ test("the trailing edge wins when the region is too big to fit", () => {
 	assert.equal(move.dy, BOX.height * (1 - FOLLOW_MARGIN) - BOX.height * 2);
 });
 
-test("bringing the trailing edge in never pushes it back out", () => {
-	// The leading-edge correction is capped by the trailing edge, or a region
-	// taller than the band would oscillate between the two.
-	const region = {"x": 0.2, "y": 0.0, "w": 0.05, "h": 0.95};
-	const move = followPan({"view": {"scale": 2, "x": 0, "y": -50}, "viewport": BOX, "picture": FULL, "region": region});
-	const top = -50 + 0 * 600;
-	const bottom = -50 + 0.95 * 600;
-	assert.ok(bottom + move.dy <= BOX.height * (1 - FOLLOW_MARGIN) + 0.001,
-		`the trailing edge ended outside the band: ${bottom + move.dy}`);
-	assert.ok(move.dy >= 0 || top + move.dy <= BOX.height * FOLLOW_MARGIN);
+test("bringing the leading edge in never pushes the trailing edge out", () => {
+	// 📏 The earlier version of this test never executed the cap it was named
+	// after: its region's trailing edge was already past the band, so __axis
+	// returned from the FIRST branch and both assertions were tautologies of
+	// that branch. Replacing the cap with a bare leading-edge correction
+	// survived it. This region takes the LEADING branch and is taller than the
+	// band, so an uncapped correction would shove the bottom back out.
+	const view = {"scale": 2, "x": 0, "y": -100};
+	const region = {"x": 0.2, "y": 0.0, "w": 0.05, "h": 0.5};
+	const top = -100;
+	const bottom = -100 + 0.5 * FULL.height * view.scale;
+	const band_lo = BOX.height * FOLLOW_MARGIN;
+	const band_hi = BOX.height * (1 - FOLLOW_MARGIN);
+	assert.ok(top < band_lo, "precondition: the leading edge is above the band");
+	assert.ok(bottom <= band_hi, "precondition: the trailing edge is already inside it");
+	assert.ok(band_lo - top > band_hi - bottom, "precondition: an uncapped correction would overshoot");
+
+	const move = followPan({view, "viewport": BOX, "picture": FULL, "region": region});
+	assert.equal(move.dy, band_hi - bottom, "the correction must stop at the trailing edge");
 });
 
 test("a letterboxed picture is measured from the picture, not the box", () => {
@@ -236,11 +263,15 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 				// a build that could not see any real cursor: at 1920x1080 a
 				// 10x20 block was detected 24 times in 60, median delta ZERO.
 				//
-				// And it sits clear of the picture's bottom, because down there
+				// It sits clear of the picture's bottom, because down there
 				// zoom.js's clamp decides the final position and the mapping
-				// stops showing through at all.
+				// stops showing through -- and clear of the LEFT edge, so it is
+				// already comfortable horizontally and only the VERTICAL pan is
+				// needed. A caret off-band on both axes cannot tell "pan if
+				// either axis needs it" from "pan only if both do", and the
+				// second never follows a scrolling prompt at all.
 				if (n % 2 === 0) {
-					x.fillStyle = "#fff"; x.fillRect(60, 745, 10, 20);
+					x.fillStyle = "#fff"; x.fillRect(512, 745, 10, 20);
 				}
 			};
 			window.__paint(1);
@@ -289,7 +320,7 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 			const pw = ratio * 2560, ph = ratio * 1080;
 			const px = (box.width - pw) / 2, py = (box.height - ph) / 2;
 			// The painted caret's centre, in source pixels.
-			const fx = (60 + 5) / 2560, fy = (745 + 10) / 1080;
+			const fx = (512 + 5) / 2560, fy = (745 + 10) / 1080;
 			return {
 				"x": tx + (px + fx * pw) * sc,
 				"y": ty + (py + fy * ph) * sc,
@@ -333,7 +364,7 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 			window.__paint = function(n) {
 				const x = c.getContext("2d");
 				x.fillStyle = "#000"; x.fillRect(0, 0, 2560, 1080);
-				if (n % 2 === 0) { x.fillStyle = "#fff"; x.fillRect(60, 745, 10, 20); }
+				if (n % 2 === 0) { x.fillStyle = "#fff"; x.fillRect(512, 745, 10, 20); }
 			};
 			window.__paint(1);
 			// bindSimpleSwitch binds on CLICK, so assigning .checked and
