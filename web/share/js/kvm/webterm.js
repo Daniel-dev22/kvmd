@@ -23,16 +23,41 @@
 // does not recognise falls through to xterm's own options -- so this is how the
 // terminal's font size is set from out here, with no ttyd flag and no reload
 // (ttyd 1.7.7, html/src/components/terminal/xterm/index.ts:
-// parseOptsFromUrlQuery, spread last into applyPreferences).
-//
-// xterm's default is 15px: on a 390px phone that is 43 columns of type too
-// small to read at arm's length. 18px is about 36 columns -- fewer, and legible,
-// which is the trade a phone wants. The desktop keeps the default.
-export const WEBTERM_COMPACT_FONT_PX = 18;
+// parseOptsFromUrlQuery, spread LAST into applyPreferences; the default branch
+// assigns terminal.options[key]. src/protocol.c sends SET_PREFERENCES on every
+// connect, so that path always runs).
 
-export function webtermUrl(base, path, compact) {
+"use strict";
+
+
+// What a phone terminal is FOR: a prompt, a command, the first screen of its
+// output. 30 columns fits `systemctl status foo` without wrapping it twice, and
+// is the width the size is derived from rather than a font size picked by eye.
+export const WEBTERM_COLUMNS = 30;
+
+// xterm's own default is 15px -- 43 columns on a 390px phone, and too small to
+// read at arm's length. The floor is what makes the change visible at all; the
+// ceiling stops a tablet from getting a font meant for a watch.
+export const WEBTERM_FONT_MIN_PX = 18;
+export const WEBTERM_FONT_MAX_PX = 26;
+
+// The advance width of a monospace glyph, in em. DejaVu Sans Mono -- what these
+// browsers fall back to -- is 0.602; every common terminal face is near enough
+// that a column count derived from it is out by less than one column.
+const CHAR_ASPECT = 0.6;
+
+
+export function webtermFontSize(width_px) {
+	let size = Math.round(width_px / (WEBTERM_COLUMNS * CHAR_ASPECT));
+	return Math.min(Math.max(size, WEBTERM_FONT_MIN_PX), WEBTERM_FONT_MAX_PX);
+}
+
+
+// width_px is the width the terminal has to live in, or null for a desktop,
+// which keeps the terminal's own default.
+export function webtermUrl(base, path, width_px) {
 	// The trailing slash avoids an Nginx 301 when the location has none, which
 	// a reverse proxy in front of PiKVM can be misconfigured to mishandle.
 	let url = base + path + "/?disableLeaveAlert=true";
-	return (compact ? `${url}&fontSize=${WEBTERM_COMPACT_FONT_PX}` : url);
+	return (width_px === null ? url : `${url}&fontSize=${webtermFontSize(width_px)}`);
 }

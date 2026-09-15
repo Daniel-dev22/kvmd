@@ -9,27 +9,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {read} from "./helpers.mjs";
-import {webtermUrl, WEBTERM_COMPACT_FONT_PX} from "../../web/share/js/kvm/webterm.js";
+import {webtermUrl, webtermFontSize, WEBTERM_COLUMNS, WEBTERM_FONT_MIN_PX, WEBTERM_FONT_MAX_PX}
+	from "../../web/share/js/kvm/webterm.js";
 
 const BASE = "https://pikvm.example.net/";
 
 test("a phone gets a font size it can read", () => {
-	const url = new URL(webtermUrl(BASE, "webterm", true));
-	assert.equal(url.searchParams.get("fontSize"), String(WEBTERM_COMPACT_FONT_PX));
-	assert.ok(WEBTERM_COMPACT_FONT_PX > 15,
-		"xterm's own default is 15px -- anything at or below it changes nothing");
+	const url = new URL(webtermUrl(BASE, "webterm", 390));
+	assert.equal(url.searchParams.get("fontSize"), String(webtermFontSize(390)));
+	assert.ok(webtermFontSize(390) >= WEBTERM_FONT_MIN_PX,
+		"xterm's own default is 15px -- anything near it changes nothing anyone can see");
+});
+
+test("the size is derived from the columns it has to leave, not chosen by eye", () => {
+	// 0.6em per glyph, so `columns = width / (size * 0.6)`. Every phone width
+	// must land within a column of the target, or the floor/ceiling must be
+	// what stopped it.
+	for (const width of [320, 360, 390, 414, 768]) {
+		const size = webtermFontSize(width);
+		const columns = width / (size * 0.6);
+		const clamped = (size === WEBTERM_FONT_MIN_PX || size === WEBTERM_FONT_MAX_PX);
+		assert.ok(clamped || Math.abs(columns - WEBTERM_COLUMNS) < 1,
+			`${width}px gives ${columns.toFixed(1)} columns at ${size}px, and nothing clamped it`);
+		assert.ok(size >= WEBTERM_FONT_MIN_PX && size <= WEBTERM_FONT_MAX_PX,
+			`${width}px asked for ${size}px, outside the bounds`);
+	}
+});
+
+test("a narrower phone never gets smaller type, only fewer columns", () => {
+	// The floor is the point of the exercise: shrinking the font to keep 30
+	// columns on a 320px screen would put it back where it was unreadable.
+	assert.equal(webtermFontSize(320), WEBTERM_FONT_MIN_PX);
+	assert.ok(webtermFontSize(390) > webtermFontSize(320)
+		|| webtermFontSize(390) === WEBTERM_FONT_MIN_PX);
 });
 
 test("the desktop keeps the terminal's own default", () => {
-	const url = new URL(webtermUrl(BASE, "webterm", false));
+	const url = new URL(webtermUrl(BASE, "webterm", null));
 	assert.equal(url.searchParams.get("fontSize"), null,
 		"a desktop has the room for the terminal's default, and overriding it is not ours to do");
 });
 
 test("the option ttyd already needed is not lost either way", () => {
-	for (const compact of [true, false]) {
-		const url = new URL(webtermUrl(BASE, "webterm", compact));
-		assert.equal(url.searchParams.get("disableLeaveAlert"), "true", `compact=${compact}`);
+	for (const width of [390, null]) {
+		const url = new URL(webtermUrl(BASE, "webterm", width));
+		assert.equal(url.searchParams.get("disableLeaveAlert"), "true", `width=${width}`);
 		assert.ok(url.pathname.endsWith("/"),
 			"the trailing slash is what keeps Nginx from answering with a 301");
 	}

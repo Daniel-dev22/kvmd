@@ -524,6 +524,40 @@ describe("the sections are a grid behind one button", {"skip": chromiumPath() ? 
 		}
 	});
 
+	for (const width of [320, 390]) {
+		test(`no tile paints outside its own box at ${width}px`, async () => {
+			// A navbar item is 50px tall because a desktop navbar is one row of
+			// them. A tile is a column -- icon over label, and the label wraps
+			// -- which needs 76px, and the 50px box did not clip it: it painted
+			// past its own border, over the tile below. Reported from a phone
+			// as "the text overflows the box borders at the bottom".
+			const pg = await open(width);
+			await pg.eval(REVEAL);
+			await openGrid(pg);
+			const over = await pg.eval(`(() => {
+				const out = [];
+				for (const li of document.querySelectorAll("#navbar-sections > li")) {
+					const item = li.querySelector(".menu-item");
+					if (item === null || item.getBoundingClientRect().height === 0) { continue; }
+					const box = li.getBoundingClientRect();
+					const content = item.getBoundingClientRect();
+					const spill = Math.round(Math.max(
+						content.bottom - box.bottom,
+						box.top - content.top,
+						item.scrollHeight - Math.round(content.height)));
+					if (spill > 0) {
+						out.push({"id": li.id, spill, "box": Math.round(box.height),
+							"content": item.scrollHeight});
+					}
+				}
+				return out;
+			})()`);
+			await pg.close();
+			assert.deepEqual(over, [],
+				`${width}px: tiles whose content is taller than the tile it is in`);
+		});
+	}
+
 	test("choosing a section shows its sheet and puts the grid away", async () => {
 		const pg = await open(390);
 		await openGrid(pg);

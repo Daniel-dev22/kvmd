@@ -259,8 +259,9 @@ export function Info() {
 				// Read at OPEN time, not at load: the layout can change while
 				// the page is up, and the terminal is not reloaded to follow it
 				// -- that would drop the shell.
+				let compact = (document.documentElement.getAttribute("data-ui") === UI_MOBILE);
 				let url = webtermUrl(base, state.webterm.path,
-					(document.documentElement.getAttribute("data-ui") === UI_MOBILE));
+					(compact ? window.innerWidth : null));
 				tools.info("Terminal opened: ", url);
 				$("webterm-iframe").src = url;
 			};

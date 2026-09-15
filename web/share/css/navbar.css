@@ -560,6 +560,11 @@ div#navbar-sections {
 	float: none;
 	display: block;
 	background-color: var(--cs-navbar-default-bg);
+	/* A navbar item is 50px tall because a desktop navbar is one row of them.
+	   A tile is a column -- icon over label, and the label wraps -- which needs
+	   76px, and the 50px box does not clip it: it PAINTS PAST ITS OWN BORDER,
+	   over the tile below. The row is as tall as what is in it. */
+	height: auto;
 }
 
 :root[data-ui="mobile"] div#navbar-sections > li > .menu-item {
@@ -570,7 +575,11 @@ div#navbar-sections {
 	align-items: center;
 	justify-content: center;
 	gap: 4px;
-	height: 100%;
+	/* Not 100%: a percentage against a parent that is itself sizing to this
+	   element resolves to auto anyway, and it read as a fixed height that the
+	   label then overflowed. Both boxes follow the content; the minimum is the
+	   touch target, not the layout. */
+	height: auto;
 	min-height: 60px;
 	padding: 8px 4px;
 	white-space: normal;
