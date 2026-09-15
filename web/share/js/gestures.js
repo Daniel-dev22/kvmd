@@ -23,8 +23,10 @@
 // mean "press what is under my finger": the video of the host.
 //
 // A finger there has to be able to click where the cursor is and right click,
-// while a DRAG still moves the cursor and two fingers still scroll. Those are
-// told apart by distance and time only, never by the element under the finger,
+// while a DRAG still moves the cursor. (Two fingers are not this module's: they
+// zoom and pan the view, in kvm/mouse.js and kvm/zoom.js. It still has to know
+// about them, because a gesture that grew a second finger is not a click.)
+// Those are told apart by distance and time only, never by the element,
 // which is why this file has no DOM in it at all and is unit-tested without a
 // browser.
 //

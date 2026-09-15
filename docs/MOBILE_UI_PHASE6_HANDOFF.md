@@ -3,18 +3,19 @@
 **Branch:** `feat/mobile-first-ui` (fork `Daniel-dev22/kvmd`, `origin`), worktree
 `/docker_container_volumes/kvmd-mobile-first`.
 **Commits:** `2148b643` (the phase), `2d533147` (review fixes), `5f769faf` (a fix found by
-canarying the review fixes), `33cdb1a7`, `af301512`, `9fad1246`, `18776fad` (what the phone
-said — see below).
-**Status:** committed and pushed. **NOT merged to `master`. Deployed to the kd appliance on
-2026-09-14** and used on a real phone, which produced the finding in §*Surprises* below.
+canarying them), then everything a real phone asked for: `33cdb1a7`, `af301512`, `9fad1246`,
+`18776fad`, `fbbeac72`, `a1b62b0e`, `a44ccb83`, `f3bf169b`, `0a2facaf`, `58f66198`.
+**Status:** committed and pushed. **NOT merged to `master`. Deployed to the kd appliance**, last at
+`58f66198` on 2026-09-15, verified each time by sha256 against the branch.
 **Read first:** `MOBILE_UI_PHASE1/2/3/5_HANDOFF.md`. (Phase 4's document describes what Phase 5
 built; its title is misleading.)
 
-**227 tests, 227 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
-tox env, three consecutive clean runs. 16 in the new `gestures.test.mjs` (no browser), 34 in the new
-`touch.test.mjs` (real touchscreen, real mouse), 12 in `events.test.mjs`.
+**242 tests, 242 passing, 0 skipped** — `node --test testenv/jstests/*.test.mjs`, also the `jstest`
+tox env, two consecutive clean runs. New files: `gestures.test.mjs` (no browser), `zoom.test.mjs`
+(no browser), `webterm.test.mjs`, `touch.test.mjs` (real touchscreen, real mouse, real pinch).
 
-This closes the plan's Phase 4 **except the entry pages**, which are the next phase.
+This closes the plan's Phase 4 **except the entry pages** — and the phone took the phase well past
+its original scope; see *What the phone changed* below, which is most of the work in these commits.
 
 ---
 
@@ -56,7 +57,9 @@ the CSS keys off that. It costs **0.025 ms per keystroke** out of 0.44 ms (222-k
 
 ### 4. The video takes a click — and refuses when it is not sure
 
-Tap → left. Press ≥500 ms → right. A drag still moves the cursor, two fingers still scroll.
+Tap → left. Press ≥500 ms → right. A drag still moves the cursor. (Two fingers scrolled the host
+when this shipped; they zoom and pan the VIEW now — see *The console opens already zoomed*, and the
+wheel buttons that took the scroll over.)
 
 The first cut also had a two-finger middle click and fired the right click at the 500 ms threshold.
 **Both were wrong, and the review is what said so** (see *The review*). As shipped:
@@ -250,7 +253,7 @@ Docker image. Copy the config, patch that one path, and run eslint 9 against it.
 
 ---
 
-## Deferred, with reasons
+## Deferred — from the phase and its review
 
 | Item | Why it is deferred |
 |---|---|
@@ -263,22 +266,145 @@ Docker image. Copy the config, patch that one path, and run eslint 9 against it.
 | Modals still have no `max-height` | Carried from Phase 5, and this phase makes it newly reachable: OCR now exists on phones, and a long `wm.error` (which passes `cancel=false`, so Escape does not dismiss it) can push OK below the fold on a 390×844 screen. |
 | The handoffs name `kdhome`, `kdhomeapps.com` and local paths, on a branch pushed to a public fork | Pre-existing across Phases 1–5. Rewriting five documents and the history that carries them is a decision for the repo's owner, not a side effect of this phase. |
 
+The device added four more of these; they are in *Deferred — from the device*, below.
+
+---
+
+## What the phone changed
+
+Everything below came from using the build on a real device, after four review lenses had finished.
+None of it was found by a lens or by any headless measurement.
+
+### The navbar is one button and a grid
+
+Option C+D of a measured options page, chosen by the owner. 📏 The strip was **815px on a 390px
+screen** with a Switch attached — 425px (52%) past the right edge, 495px (61%) at 320px, ATX (the
+fourth item) starting at x=376. Seven of nine items were never seen. The bar is now identity, status
+and one button; the sections are tiles in a grid, **with Keyboard and Mouse among them**. The four
+global LEDs (link, video, keyboard, mouse) moved out of the System button into `#navbar-status`:
+they are status, not a section, and inside it they made it the widest thing on the bar and scrolled
+off with it.
+
+152 lines of strip machinery went with it — the scroll container, the named scroll timeline, both
+edge-fade pseudo-elements and the eight `order` values. Desktop is untouched, by measurement:
+`#navbar-sections` is `display: contents` there, one row, no overflow, no Menu button.
+
+Three defects found while building it, all invisible to a class-based check, all now tested:
+
+- Every section's sheet is a **descendant of the grid container**, so hiding that container hid the
+  sheets with it — choosing System opened a sheet nobody could see.
+- With the tiles merely hidden, the container still stood **152px tall over the video**, invisible
+  and eating every tap on it. Closed, each section is `display: contents`: no box at all.
+- A tile's box was **50px** (a navbar item is one row of a desktop bar) while its content was
+  **76px**, so the label painted 26px past its own border onto the tile below — reported from the
+  phone as *"the text overflows the box borders at the bottom"*.
+
+### The console opens already zoomed
+
+This was the original request, and it took three wrong targets to hear it: *"zoom in the terminal
+screen so it's readable in the box it's in"* means **the host's screen in the video on `/kvm`**, not
+the web terminal. The picture is PIXELS — 1920×1080 on a 390px phone is **4.8px per character** —
+so there is no font to change and no way to read it at 1×.
+
+- **`System → Video quality settings → "Zoom the console by"`**, 100–400% in 25% steps, persisted,
+  compact only. 📏 **250%**, chosen on the phone: the one number in this phase that cannot be derived
+  from anything.
+- The view **starts there on every load**, anchored top-left, where a console's prompt is.
+- **Two fingers move the view and send nothing to the host**: pinch to zoom about the point between
+  them, drag to pan. That is what the pad's Up/Down wheel buttons were restored to pay for.
+- One finger is unchanged: cursor, tap-to-click, long press for right click.
+
+The part that had to be exactly right is **where a click lands**. A tap is reported in the PICTURE's
+coordinates, not the glass's: zoomed 2× from the top-left, 100px along the glass is 50px into the
+host's screen. Relative drags are divided by the scale for the same reason. `kvm/zoom.js` is DOM-free
+so every rule is tested without a browser — the anchor stays under the fingers, the picture can never
+be panned off its own box, the scale is bounded both ways, zooming out recentres, and a smaller
+viewport re-clamps a view that was already panned.
+
+### The web terminal is scaled, not asked
+
+`/extras/webterm/ttyd/` is a different thing from the console, and it needed a different fix. ttyd
+**does** read `fontSize` off its URL — the parser is in the build on the appliance, which I checked
+by pulling its page off its UNIX socket — and `18px` and then `30px` were both reported from the
+phone as having no effect. A knob that cannot be verified from here is not a knob.
+
+`transform: scale(2.25)` on the iframe needs nothing from ttyd: the terminal is laid out at half
+size and drawn at twice it, so it is handed ~193px on a 390px phone, lays itself out for that, and
+every pixel it draws lands twice the size. 📏 Measured: the iframe paints 386px wide inside a 390px
+window with an inner viewport of 193px; ten characters measure 90px inside and 181px on screen.
+The `fontSize` parameter was **removed** rather than left as a belt — if ttyd does honour it, the two
+multiply.
+
+### The launcher, and the pad's wheel
+
+- The launcher put KVM and Terminal on one row and wrapped **Logout** onto a second, at 390 *and*
+  320px. The three share a row now, down to the narrowest phone.
+- Upstream ships **Up/Down wheel buttons** on the mouse pad behind an inline `display: none` — a
+  desktop judgement, since a mouse has a wheel. A phone does not, and now that two fingers move the
+  view, they are the host's scroll. 190×46 each in compact, still hidden on the desktop.
+
+---
+
+## Traps — from this session, do not re-derive these
+
+**`zoom` does not cross into a subframe in every engine.** Both `zoom` and `transform` scale an
+iframe in Blink, and `zoom` also halves the child's layout viewport there (measured: 193px inside a
+386px box). But a subframe is its own rendering context and WebKit does not propagate `zoom` into
+one — which is the exact shape of *"it didn't zoom"* from a phone. Use `transform` for a subframe.
+
+**A top-level page without a viewport meta is laid out at ~980px and scaled to fit; an iframe is
+not.** 📏 A ttyd-shaped page (no viewport meta) opened top-level on a 390px phone lays out at 980px
+and is scaled to **0.4×** — a 15px font *looks like 6px*. The same document inside an iframe gets the
+iframe's own box. That difference decides which fixes can work at all, and it is invisible unless you
+measure both.
+
+**`bindSimpleSlider` writes its default to localStorage on the FIRST load.** So raising a default in
+the code reaches nobody who has already opened the page — their browser is holding the old one and
+the code and the device disagree silently. A one-time migration behind a marker is what moves them;
+`stream.zoom` has one, and the marker is what lets a *deliberate* choice of the old value stick.
+
+**A canary that does not restore leaves its mutation in the working tree**, and the next run reads as
+a real regression. Three ways it happened here: `git checkout --` discarding an uncommitted fix, a
+suite run that **timed out** before the restore, and a run **killed from outside** between mutate and
+restore. Put the restore in a `finally`, commit before canarying, and expect a loaded machine — this
+one was at **load 10.5 on 8 cores** with three large processes that were not mine.
+
+**A test that passes alone and fails in a full run is a race, not a defect.** One read the System
+sheet in the frame the tap landed in; under load the layout had not settled, and *a sheet measured
+mid-open is indistinguishable from one that opened where nobody can see it* — which is the defect
+that test exists to catch. Wait for the thing, never for a guessed number of milliseconds.
+
+**`Input.synthesizePinchGesture` is not evidence on every page.** It takes the launcher from scale 1
+to 2.5 and does nothing at all on `/kvm` — no touch events, no scale change — even with every
+handler permissive. Its silence there is an instrument limit, not a finding. The launcher control is
+what proves the instrument works.
+
+---
+
+## Deferred — from the device
+
+| Item | Why |
+|---|---|
+| The browser's own pinch still does nothing on `/kvm` | `preventDefault` is now limited to single-finger touches and `touch-action: pinch-zoom` is on the stream, and it made no difference on the device. Unexplained. It no longer matters — the console has its own zoom, which is better anyway because it survives a reload and does not zoom the chrome with it. |
+| Whether ttyd honours `fontSize` from the URL on this appliance | The parser is in the shipped bundle; two attempts had no visible effect; the query has to survive kvmd's proxying, the login redirect and ttyd's websocket handshake, and none of that is observable from here. Moot now the iframe is scaled. |
+| The console zoom has no reset control | Pinching back out reaches 100% and the slider sets any value, so nothing is unreachable. A "fit" button is product surface nobody has asked for. |
+| Two-finger *scroll of the host* is gone from the video | Replaced by the pad's Up/Down buttons, which is what paid for pinch-to-zoom on the view. If the buttons turn out to be worse in practice, the gesture is 20 lines to restore — but then the view zoom needs another home. |
+
 ---
 
 ## Next phase — first concrete step
 
-**The entry pages: `web/login/index.pug` and `web/index.pug`.** They are the last of the plan's
-Phase 4 and have had no mobile work at all — the launcher is still a `<table>` layout
-(`web/index.pug:12-31`), and the login page has never been measured at 320 px.
+**The entry pages: `web/login/index.pug` and `web/index.pug`.** The launcher's app row is fixed, but
+neither page has had a real mobile pass — the launcher is still a `<table>` layout and the login page
+has never been measured at 320px.
 
-Start by measuring what they do now: `testenv/jstests/layout.test.mjs` already opens every page in
-`PAGES` at 320/360/390/768 and asserts no horizontal overflow, so the foundation is there; what is
-missing is touch-target and reading-order coverage for those two pages. Then decide whether the
-launcher's table becomes a flex list or a grid.
+Start by measuring what they do now: `layout.test.mjs` already opens every page in `PAGES` at
+320/360/390/768 and asserts no horizontal overflow, so the foundation is there; what is missing is
+touch-target and reading-order coverage for those two pages.
 
 ⚠ **Before starting, re-read the plan's deferred register** (`~/.claude/plans/can-you-look-at-stateful-neumann.md`)
 and re-run the measurement each row carries. A note is a measurement of the system when it was
-written, and this phase already moved three of them.
+written, and this phase moved several of them.
 
 ---
 
@@ -290,48 +416,29 @@ ansible-playbook pikvm/deploy_web_ui.yaml -e 'server_home=kdhome' -e 'pikvm_web_
 ```
 (ansible branch `feat/pikvm-web-deploy`, worktree `/docker_container_volumes/ansible-pikvm-web-deploy`.)
 
-The play now deploys a **git export of `pikvm_web_ref`** (default `HEAD`) rather than the working
-tree, so nothing untracked can ride along — during this phase's review that checkout had four agents
-reading it and one mutating files. Run end to end on 2026-09-14 (`ok=19 changed=7 failed=0`,
-rootfs back to `ro`), and verified against the device rather than the exit code: **all 58 js/css/html
-files on the appliance match the branch by sha256**, and nginx serves the new `gestures.js` with the
-same hash.
+The play deploys a **git export of `pikvm_web_ref`** (default `HEAD`) rather than the working tree,
+so nothing untracked can ride along. Run eleven times this session; every run verified afterwards by
+comparing sha256 of every `.js`/`.css`/`.html` on the appliance against the branch, and that the
+rootfs went back to `ro`.
 
 ⚠ `pacman -Syu` on the appliance reverts `/usr/share/kvmd/web`. The appliance runs **kvmd 4.213**
 while this branch is based on **v4.215**; the web UI is static and served straight off disk, so
 nothing is restarted and no session is interrupted, but that version gap has not been audited for
 API drift.
 
-### The navbar became one button and a grid
+---
 
-Option C+D of a measured options page, chosen by the owner. 📏 The strip was **815px on a 390px
-screen** with a Switch attached — 425px (52%) past the right edge, 495px (61%) at 320px, ATX (the
-fourth item) starting at x=376. Seven of nine items were never seen. The bar is now identity, status
-and one button; the sections are tiles in a grid, **with Keyboard and Mouse among them**. 152 lines
-of strip machinery went with it — the scroll container, the named scroll timeline, both edge-fade
-pseudo-elements and the eight `order` values.
+## The one lesson this phase is actually about
 
-Two defects found while building it, both invisible to a class-based check and both now tested:
-every section's sheet is a **descendant of the grid container**, so hiding that container hid the
-sheets too (choosing System opened a sheet nobody could see); and with the tiles merely hidden the
-container still stood **152px tall over the video**, invisible and eating every tap on it.
+📏 **The phone found nine defects that four independent review lenses and every headless measurement
+missed** — and three of them were Phase 5's, shipped and unnoticed. Two were structurally invisible
+to this suite: the test page has no hardware behind it and no browser chrome, so its sheets are
+shorter than a real device's and content that is buried on a phone still fits on the emulator.
 
-### Two more the phone asked for
+Three separate times this session I fixed the wrong thing with confidence — the ttyd font when the
+ask was the console, `zoom` when the engine needed `transform`, a default constant when the device
+was holding a stored value. Each was a reasonable inference from evidence I had, and each was wrong
+in a way only the device could show.
 
-- **The launcher** put KVM and Terminal on one row and wrapped Logout onto a second, at 390 *and*
-  320px. The three tiles share a row now, down to the narrowest phone.
-- **The terminal** opens at `fontSize=18` on a phone. ttyd 1.7.7 merges the URL query over its own
-  options and the server's, and an unrecognised key falls through to xterm's own — so the size is
-  set from the iframe URL with no ttyd flag and no reload of a live shell. 15px (xterm's default) is
-  43 columns of unreadable type at 390px; 18px is about 36 legible ones. Read at OPEN time, because
-  the layout can change while the page is up and reloading the terminal would drop the shell.
-
-📏 **Four defects came from one phone in one sitting, none of which any lens or any measurement had
-found**, and three of them were Phase 5's. Two were invisible to this suite because the test page has
-no hardware behind it and no browser chrome, so its sheets are shorter than a real device's.
-
-**Real-device testing remains the highest-yield channel by a wide margin**, and this phase is the one
-that most needs it: every gesture here is a judgement about what a finger MEANT, and four of the six
-gestures were re-decided during review on reasoning alone. The first things to try on the phone are
-the ones no measurement can settle — whether the 500 ms arm feels long or short, whether the armed
-outline reads as "lift to right click", and whether tapping to click is a relief or a hazard.
+**Deploy early, and ask the device.** Every measurement in this document is worth less than one
+person looking at a phone.
