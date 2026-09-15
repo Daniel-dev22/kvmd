@@ -60,13 +60,16 @@ test("JPEG noise is not a change", () => {
 		b[p] = 5; b[p + 1] = 5; b[p + 2] = 5;   // 15 summed, under the threshold
 	}
 	assert.equal(changedRegion(a, b, 8, 4), null);
-	// Both sides, or a build with the threshold raised 8x passes: a cell just
-	// over it must register.
-	const over = Math.ceil((FOLLOW_CELL_DELTA + 3) / 3);
+	// Both sides, with LITERAL fixtures. 📏 Deriving the loud one from
+	// FOLLOW_CELL_DELTA made it agree with any threshold -- raising the
+	// constant 8x raised the fixture with it and the test still passed, which
+	// is the same tautology as asserting a constant is less than one.
+	assert.ok(FOLLOW_CELL_DELTA > 15 && FOLLOW_CELL_DELTA < 30,
+		`these fixtures bracket the threshold; it is now ${FOLLOW_CELL_DELTA}`);
 	const loud = frame(8, 4);
-	loud[0] = loud[1] = loud[2] = over;
+	loud[0] = loud[1] = loud[2] = 10; // 30 summed, over
 	assert.notEqual(changedRegion(a, loud, 8, 4), null,
-		`${over * 3} over black must register against a threshold of ${FOLLOW_CELL_DELTA}`);
+		"30 summed over black must register");
 });
 
 // ---- deciding whether to move ----
