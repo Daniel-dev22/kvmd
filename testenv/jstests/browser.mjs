@@ -196,6 +196,33 @@ async function newPage(port) {
 		"pinch": (x, y, scale) => send("Input.synthesizePinchGesture", {
 			x, y, "scaleFactor": scale, "relativeSpeed": 800,
 		}),
+		// A real key, routed by the engine, so the editor performs its own
+		// DEFAULT ACTION: Backspace actually removes a character from the focused
+		// field and the page hears about it as input/deleteContentBackward. A
+		// KeyboardEvent dispatched from inside the page does none of that, which
+		// is precisely the mechanism the typing bar depends on.
+		// `text` is what makes the engine INSERT the character: without it a key
+		// is delivered but types nothing, which would silently turn every
+		// assertion about typed text into an assertion about an empty field.
+		// `modifiers` is CDP's bitmask -- Alt 1, Ctrl 2, Meta 4, Shift 8.
+		"key": async (key, code, vk, {text = undefined, modifiers = 0} = {}) => {
+			const ev = {key, code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, modifiers};
+			await send("Input.dispatchKeyEvent", {
+				"type": (text === undefined ? "rawKeyDown" : "keyDown"), ...ev,
+				...(text === undefined ? {} : {text}),
+			});
+			await send("Input.dispatchKeyEvent", {"type": "keyUp", ...ev});
+		},
+		// What a soft keyboard does while a word is still being composed: the
+		// engine's own IME path, so compositionstart/compositionupdate and the
+		// insertCompositionText input events are the browser's, not ours. Calling
+		// it again replaces the composing text, the way another letter does.
+		"compose": (text) => send("Input.imeSetComposition", {
+			text, "selectionStart": text.length, "selectionEnd": text.length,
+		}),
+		// Commits what is being composed, which is what a space or a punctuation
+		// mark does on a phone. With nothing composing it just types the text.
+		"commit": (text) => send("Input.insertText", {text}),
 		"eval": async (expression) => {
 			const out = await send("Runtime.evaluate", {
 				expression, "returnByValue": true, "awaitPromise": true,

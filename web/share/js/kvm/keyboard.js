@@ -25,7 +25,7 @@ import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
 import {UI_MOBILE} from "../ui.js";
 import {printText} from "./print.js";
-import {diffTyped, makePrintQueue} from "./typing.js";
+import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
 
 export function Keyboard(__recordWsEvent) {
@@ -204,7 +204,37 @@ export function Keyboard(__recordWsEvent) {
 		}
 	};
 
+	// The typing bar owns the line being typed, so the scancode path must keep
+	// its hands off the keys that edit it.
+	//
+	// This handler is bound on the whole keyboard WINDOW, and the bar lives
+	// inside it -- so every key pressed in the bar was also going out as a
+	// scancode the instant it was pressed. Enter reached the host TWICE, and the
+	// immediate one arrived ahead of the characters it was meant to run; every
+	// other key was preventDefault()ed before it could enter the field at all,
+	// which is why a hardware keyboard could not type into the bar.
+	//
+	// A character, Backspace, Delete and Enter are part of the line and go
+	// through the bar's queue. Everything else -- Esc, Tab, the arrows, anything
+	// held with Ctrl/Alt/Meta -- is not, and still goes straight out, because
+	// Ctrl+C in a console is not optional.
+	var __isTypingBarKey = function(ev) {
+		if (ev.target !== $("hid-type-input") || typeof ev.key !== "string") {
+			return false;
+		}
+		if (ev.ctrlKey || ev.altKey || ev.metaKey) {
+			return false;
+		}
+		// "Process" and "Unidentified" are a soft keyboard mid-composition: the
+		// field is the only thing that can say what the user meant.
+		return (ev.key.length === 1
+			|| ["Enter", "Backspace", "Delete", "Process", "Unidentified"].includes(ev.key));
+	};
+
 	var __keyboardHandler = function(ev, state) {
+		if (__isTypingBarKey(ev)) {
+			return;
+		}
 		if (ev.code === "CapsLock") {
 			__syncCapsReload();
 		}
@@ -387,16 +417,21 @@ export function Keyboard(__recordWsEvent) {
 	// The phone's own keyboard drives the host. Characters go through the
 	// server's keymap (api/hid/print) rather than being mapped to scancodes
 	// here, so swipe, dictation, long-press accents and autocorrect all work,
-	// and there is no second copy of every keymap in the browser.
+	// and there is no second copy of every keymap in the browser. Editing
+	// intents that are not characters -- Backspace, Enter -- go out as ordinary
+	// key events, through the SAME queue, so they cannot overtake the text they
+	// follow.
 	//
-	// Editing intents that are not characters -- Backspace, Enter -- are sent
-	// as ordinary key events on the existing socket.
+	// The field is a pipe, never a transcript: see typing.js. It holds the word
+	// an IME is still composing and nothing else, because everything before that
+	// has already reached the host.
 
 	var __typed = "";
 	var __composing = false;
-	var __printer = null;
-	var __blur_timer = null;
+	var __queue = null;
+	var __reset_timer = null;
 	var __exitTyping = null;
+	var __blur_timer = null;
 
 	var __initTyping = function() {
 		let el = $("hid-type-input");
@@ -404,8 +439,9 @@ export function Keyboard(__recordWsEvent) {
 			return; // Desktop pages do not render the typing bar
 		}
 
-		__printer = makePrintQueue({
-			"post": (text, keymap, done) => printText(text, keymap, 0, (http) => done(http.status === 200, http)),
+		__queue = makeTypingQueue({
+			"print": (text, keymap, done) => printText(text, keymap, 0, (http) => done(http.status === 200, http)),
+			"sendKey": __sendKey,
 			"getKeymap": function() {
 				// The Text menu already owns the keymap chooser; reuse it
 				// rather than offering a second one that could disagree.
@@ -439,6 +475,10 @@ export function Keyboard(__recordWsEvent) {
 				clearTimeout(__blur_timer);
 				__blur_timer = null;
 			}
+			// The padding only has to exist while a soft keyboard is looking at
+			// the field. Installing it on focus keeps the field genuinely empty
+			// the rest of the time, which is what lets the placeholder render.
+			__resetField(el);
 			document.documentElement.setAttribute("data-typing", "1");
 			wm.organizeAllWindows();
 		});
@@ -457,6 +497,7 @@ export function Keyboard(__recordWsEvent) {
 		};
 
 		el.addEventListener("blur", function(ev) {
+			__clearField(el);
 			// Typing mode is a MODE, not a shadow of where focus happens to be.
 			// Focus moving to another CONTROL is not a decision to leave it:
 			// tapping the mouse button in this window's own header blurred the
@@ -478,53 +519,94 @@ export function Keyboard(__recordWsEvent) {
 			}, 200);
 		});
 
-		// An IME composes in place and fires input events for partial text.
-		// Sending those would type every intermediate guess to the host.
+		// An IME composes a word in place, firing an input event per character.
+		// Those are forwarded like any other edit: the host has to track the
+		// finger, not lag a word behind it. Suppressing them until the word
+		// committed is what made the field disagree with the console -- the
+		// letters sat in the box, the console stayed blank, and a delete inside
+		// the word reached the host as nothing at all.
+		//
+		// What composition DOES gate is the reset: the field is the IME's own
+		// workspace until it commits, so it is left alone until then.
 		el.addEventListener("compositionstart", function() {
 			__composing = true;
 		});
 		el.addEventListener("compositionend", function() {
 			__composing = false;
-			__syncTyped(el);
+			// Engines disagree about whether the final input event comes before
+			// or after this one, so both paths decode. Whichever runs second
+			// sees no change and emits nothing.
+			__onEdit(el, null);
 		});
-		el.addEventListener("input", function() {
-			if (!__composing) {
-				__syncTyped(el);
-			}
+		el.addEventListener("input", function(ev) {
+			__onEdit(el, ev.inputType);
 		});
 		el.addEventListener("keydown", function(ev) {
 			if (ev.key === "Enter") {
+				// preventDefault stops the single-line field submitting, and is
+				// why no input event follows this to double the Enter.
 				ev.preventDefault();
-				__sendKey("Enter", true);
-				__sendKey("Enter", false);
-				el.value = "";
-				__typed = "";
+				if (!$("hid-mute-switch").checked) {
+					// Queued, not sent: Enter runs the command, so it must not
+					// reach the host before the characters of that command do.
+					__queue.push([{"key": "Enter", "n": 1}]);
+				}
+				__resetField(el);
 			}
 		});
 
 		tools.el.setOnClick($("hid-type-clear"), function() {
 			// Local only -- clears the field, never touches the host.
-			el.value = "";
-			__typed = "";
+			__resetField(el);
 			el.focus();
 		});
 	};
 
-	var __syncTyped = function(el) {
-		let now = el.value;
-		let was = __typed;
-		__typed = now;
+	// The field is put back to its padding after every edit, so nothing
+	// accumulates in it. It happens on the next task rather than inside the
+	// handler: mutating the value a soft keyboard is mid-way through reading is
+	// how an IME ends up duplicating what it just inserted.
+	var __scheduleReset = function(el) {
+		if (__reset_timer !== null) {
+			return;
+		}
+		__reset_timer = setTimeout(function() {
+			__reset_timer = null;
+			if (__composing) {
+				return; // The IME still owns the field; compositionend reschedules
+			}
+			__resetField(el);
+		}, 0);
+	};
 
+	var __resetField = function(el) {
+		el.value = PAD;
+		__typed = PAD;
+		// Programmatic assignment fires no input event, so this cannot loop.
+		el.setSelectionRange(PAD.length, PAD.length);
+	};
+
+	var __clearField = function(el) {
+		// A reset still pending from the last edit would put the padding back
+		// after this, and a field that is not empty renders no placeholder -- so
+		// leaving typing mode would leave an empty-looking box with no hint in it.
+		if (__reset_timer !== null) {
+			clearTimeout(__reset_timer);
+			__reset_timer = null;
+		}
+		el.value = "";
+		__typed = "";
+	};
+
+	var __onEdit = function(el, input_type) {
+		let was = __typed;
+		let now = el.value;
+		__typed = now;
+		__scheduleReset(el);
 		if ($("hid-mute-switch").checked) {
 			return;
 		}
-
-		let change = diffTyped(was, now);
-		for (let left = change.backspaces; left > 0; left -= 1) {
-			__sendKey("Backspace", true);
-			__sendKey("Backspace", false);
-		}
-		__printer.push(change.added);
+		__queue.push(decodeEdit({"was": was, "now": now, "input_type": input_type}));
 	};
 
 	// The compact board shows one layer at a time. Desktop ignores this
