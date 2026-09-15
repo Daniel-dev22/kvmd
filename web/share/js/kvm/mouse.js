@@ -484,6 +484,23 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 			canvas.width = FOLLOW_COLS;
 			canvas.height = FOLLOW_ROWS;
 			__follow_ctx = canvas.getContext("2d", {"willReadFrequently": true});
+			// 🔴 Without this the downscale POINT-SAMPLES, throwing away 575 of
+			// every 576 source pixels going from 1920x1080 to 80x45 -- so a
+			// cursor smaller than a whole character cell is not dimmer, it is
+			// ABSENT. Measured, detections out of 60 positions at 1920x1080:
+			//
+			//                            default   high
+			//   block 24x36 (full cell)   60/60    60/60
+			//   block 10x20 (box cursor)  24/60    60/60   <- median delta 0
+			//   underline 24x4 (BIOS)     13/60    60/60   <- median delta 0
+			//   bar 2x36 (GUI caret)       7/60    42/60
+			//
+			// The idle-shell case -- the one that makes this worth having --
+			// did not work at the resolution it was built for. It costs: a
+			// sample goes from 0.42ms to 1.58ms at 1080p, which is why every
+			// "not now" test in the tick happens before the sample.
+			__follow_ctx.imageSmoothingEnabled = true;
+			__follow_ctx.imageSmoothingQuality = "high";
 		}
 		__follow_prev = null;
 		__follow_timer = setInterval(__followTick, Math.round(1000 / FOLLOW_HZ));

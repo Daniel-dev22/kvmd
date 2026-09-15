@@ -219,20 +219,28 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 		// stream-canvas is one of the three elements the follower samples.
 		await pg.eval(`(() => {
 			const c = document.getElementById("stream-canvas");
-			// A real console's shape. Contained in the stream box this is
-			// width-limited, so it carries a vertical letterbox -- which is the
-			// difference between measuring the region against the picture and
-			// against the box, and the whole point of this test.
-			c.width = 1920; c.height = 1080;
+			// Wide enough that the vertical letterbox is LARGE. 1920x1080 in
+			// this box leaves only ~30px a side, inside the sample grid's own
+			// quantisation, so a mapping that ignores the letterbox still lands
+			// close enough to pass. At 2560x1080 it is ~58px a side.
+			c.width = 2560; c.height = 1080;
 			c.classList.remove("hidden");
 			document.getElementById("stream-image").classList.add("hidden");
 			window.__paint = function(n) {
 				const x = c.getContext("2d");
-				x.fillStyle = "#000"; x.fillRect(0, 0, 1920, 1080);
-				// A cursor blinking near the bottom-left, where a prompt sits
-				// once output has pushed it down the screen.
+				x.fillStyle = "#000"; x.fillRect(0, 0, 2560, 1080);
+				// 📏 10x20 is a real box cursor, and it is SMALLER THAN A SAMPLE
+				// CELL (2560x1080 over 80x45 makes a cell 32x24 source px). A
+				// 24x40 block fills a whole cell, which is the one size that
+				// survives a point-sampled downscale -- so this test passed on
+				// a build that could not see any real cursor: at 1920x1080 a
+				// 10x20 block was detected 24 times in 60, median delta ZERO.
+				//
+				// And it sits clear of the picture's bottom, because down there
+				// zoom.js's clamp decides the final position and the mapping
+				// stops showing through at all.
 				if (n % 2 === 0) {
-					x.fillStyle = "#fff"; x.fillRect(60, 1010, 24, 40);
+					x.fillStyle = "#fff"; x.fillRect(60, 745, 10, 20);
 				}
 			};
 			window.__paint(1);
@@ -277,11 +285,11 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 			const m = /translate\\(([-0-9.]+)px,\\s*([-0-9.]+)px\\)\\s*scale\\(([0-9.]+)\\)/.exec(c.style.transform || "");
 			if (m === null) { return null; }
 			const tx = parseFloat(m[1]), ty = parseFloat(m[2]), sc = parseFloat(m[3]);
-			const ratio = Math.min(box.width / 1920, box.height / 1080);
-			const pw = ratio * 1920, ph = ratio * 1080;
+			const ratio = Math.min(box.width / 2560, box.height / 1080);
+			const pw = ratio * 2560, ph = ratio * 1080;
 			const px = (box.width - pw) / 2, py = (box.height - ph) / 2;
 			// The painted caret's centre, in source pixels.
-			const fx = (60 + 12) / 1920, fy = (1010 + 20) / 1080;
+			const fx = (60 + 5) / 2560, fy = (745 + 10) / 1080;
 			return {
 				"x": tx + (px + fx * pw) * sc,
 				"y": ty + (py + fy * ph) * sc,
@@ -292,15 +300,20 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 		assert.ok(moved < -1,
 			`the view never followed the cursor down: translateY ${moved}, transform ${scale}`);
 		assert.ok(caret !== null, "no transform to measure");
-		// It has to be ON SCREEN, which is the property that matters and the
-		// one a mapping error breaks. It cannot always reach the comfort band:
-		// a caret at the very bottom of the picture would need the view panned
-		// past the picture's own edge, and zoom.js clamps that so no blank
-		// strip is ever shown.
 		assert.ok(caret.y >= 0 && caret.y <= caret.h,
 			`the caret is not on screen: y ${caret.y.toFixed(1)} of ${caret.h}`);
-		assert.ok(caret.x >= 0 && caret.x <= caret.w,
-			`the caret is not on screen: x ${caret.x.toFixed(1)} of ${caret.w}`);
+		// WHERE it came to rest, not merely that it is on screen. 📏 The single
+		// assertion "translateY got more negative" was satisfied by zoom.js's
+		// CLAMP -- measured at exactly -416 against a requested -443.8 -- so
+		// the magnitude the follower computed was erased before anything
+		// observed it, and almost every mutation of the arithmetic survived.
+		// This caret sits clear of the clamp, so the arithmetic alone decides.
+		// The tolerance is the sample grid's quantisation (~12 box px here);
+		// ignoring the ~58px letterbox misses by far more.
+		const want = caret.h * (1 - FOLLOW_MARGIN);
+		assert.ok(Math.abs(caret.y - want) <= 25,
+			`the caret came to rest ${(caret.y - want).toFixed(1)}px off the comfort band `
+			+ `(y ${caret.y.toFixed(1)}, band ${want.toFixed(1)}, box ${caret.h})`);
 	});
 
 	// This is also the negative control for the test above: if the view moved
@@ -314,13 +327,13 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 		await pg.eval("new Promise((r) => setTimeout(r, 400))");
 		await pg.eval(`(() => {
 			const c = document.getElementById("stream-canvas");
-			c.width = 1920; c.height = 1080;
+			c.width = 2560; c.height = 1080;
 			c.classList.remove("hidden");
 			document.getElementById("stream-image").classList.add("hidden");
 			window.__paint = function(n) {
 				const x = c.getContext("2d");
-				x.fillStyle = "#000"; x.fillRect(0, 0, 1920, 1080);
-				if (n % 2 === 0) { x.fillStyle = "#fff"; x.fillRect(60, 1010, 24, 40); }
+				x.fillStyle = "#000"; x.fillRect(0, 0, 2560, 1080);
+				if (n % 2 === 0) { x.fillStyle = "#fff"; x.fillRect(60, 745, 10, 20); }
 			};
 			window.__paint(1);
 			// bindSimpleSwitch binds on CLICK, so assigning .checked and
