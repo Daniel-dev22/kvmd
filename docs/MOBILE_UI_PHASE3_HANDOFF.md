@@ -29,7 +29,9 @@ and the server already owns them. A test fails the build if a mapping table appe
 POSTs can reach the host out of order and scramble the text. Anything typed during a request is
 coalesced into the next one.
 
-**IME composition is suppressed until it ends.** An IME composes in place and fires an `input` event
+**IME composition is suppressed until it ends.** ⚠ **SUPERSEDED BY PHASE 7** — this is
+exactly what made the console lag a whole word behind the box, and a delete inside a composing word
+reach the host as nothing. See `MOBILE_UI_PHASE7_HANDOFF.md`. Original text: An IME composes in place and fires an `input` event
 for each partial guess; sending those types every intermediate guess to the host.
 
 **The typing field is 16px.** Anything smaller makes iOS zoom the whole page the moment it is focused.
@@ -41,7 +43,8 @@ than pretending.
 
 ## Structure
 
-- `web/share/js/kvm/typing.js` — `diffTyped()` and `makePrintQueue()`. No DOM, no transport, so both
+- `web/share/js/kvm/typing.js` — `diffTyped()` and `makePrintQueue()`. ⚠ `makePrintQueue` no longer
+  exists; Phase 7 replaced it with `makeTypingQueue()`, which carries keys as well as text. No DOM, no transport, so both
   are unit-tested directly.
 - `web/share/js/kvm/print.js` — `printText()`, the `api/hid/print` call, **hoisted out of `paste.js`**.
   `paste.js` now goes through it, so a fix to one caller cannot miss the other.
