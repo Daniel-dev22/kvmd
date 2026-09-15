@@ -132,6 +132,20 @@ async function hostSettled(pg, want, ms = 2000) {
 	return pg.eval("window.__host");
 }
 
+// Waits for a condition to become true rather than sampling it once after a
+// guessed delay. The failure cue clears itself after 2s, so a single late
+// sample races its own expiry -- which is a flake that only shows under load.
+async function waitFor(pg, expression, ms = 2000) {
+	const until = Date.now() + ms;
+	do {
+		if (await pg.eval(expression)) {
+			return true;
+		}
+		await pg.eval("new Promise((r) => setTimeout(r, 40))");
+	} while (Date.now() < until);
+	return false;
+}
+
 // Characters are coalesced into one request per burst, deliberately, so the
 // text that reached the host is the concatenation and not the request count.
 const typed = (host) => host
@@ -293,8 +307,8 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		server.control.printStatus = 500;
 		await pg.commit("rm -rf /tmp/x");
 		await pg.key("Enter", "Enter", 13);
-		const host = await hostSettled(pg, 0, 1500);
-		const failed = await pg.eval(`${FIELD}.hasAttribute("data-failed")`);
+		const failed = await waitFor(pg, `${FIELD}.hasAttribute("data-failed")`);
+		const host = await hostSettled(pg, 0, 800);
 		await pg.close();
 		assert.equal(host.filter((e) => e.startsWith("key Enter")).length, 0,
 			`an orphaned Enter reached the host: ${JSON.stringify(host)}`);

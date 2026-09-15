@@ -10,7 +10,7 @@ on the appliance against the branch.
 **Read first:** `MOBILE_UI_PHASE3_HANDOFF.md` (this phase REVERSES its central decision) and
 `MOBILE_UI_PHASE6_HANDOFF.md`.
 
-**278 tests, 278 passing, 0 skipped, 59.6 s** — `CHROMIUM=/snap/bin/chromium node --test
+**286 tests, 286 passing, 0 skipped, ~60 s**, two consecutive clean runs — `CHROMIUM=/snap/bin/chromium node --test
 testenv/jstests/*.test.mjs`, on a quiet machine (load 0.8, 17 GB available).
 
 📏 An earlier run of the same tree reported **276/278**. Both failures (`the fn layer fits a 320px
@@ -88,8 +88,9 @@ performs the editor's real default action. Assertions read **what the host recei
   `TYPE_TEXT_FLAG_NO_SUGGESTIONS` — a Gboard that honours it **may never compose for Latin input at
   all**, making the composing path the suite exercises the *CJK* path in practice. Unresolved; the
   device can answer it.
-- **The mutation/verification lens never ran** (killed by an auth failure, then the machine became
-  unusable). Nobody has measured which of these tests prove nothing. That is the single biggest gap.
+- **The mutation sweep DID run, and its verdict was bad**: 📏 **26 mutations, 12 survived all 278
+  tests (46%)**. Eleven are now killed and the twelfth is recorded below. See *The sweep* — it is
+  the most useful section in this document.
 
 ---
 
@@ -127,6 +128,43 @@ run long; an interactive keystroke that has not landed in seconds is not going t
 key behind it. Paste keeps the old value; typing gets 15 s.
 
 ---
+
+## The sweep, and the instrument that was hiding it
+
+📏 **26 mutations, 12 survivors (46%).** Every survivor was in a layer nothing observed, or was a
+property nothing stated. The headline is the worst possible one:
+
+> **Dispatching Enter immediately instead of queueing it — this phase's own reported defect,
+> verbatim — survived all 278 tests.**
+
+Not because the test was missing. Because the instrument recorded a print at **dispatch**, so *in
+flight* was unobservable and a build that fires Enter the moment it is pressed logged in exactly the
+same order as one that queues it. Repairing the instrument flips it: the test now fails with
+`["key Enter down","key Enter up","print \"ls -la\""]`.
+
+Two instrument repairs were needed, and the second is the subtle one:
+
+1. **Record on completion, not on dispatch.**
+2. **Register the listener at XHR construction, not inside `send()`.** Listeners fire in
+   registration order, and the page dispatches the next queued key from inside its *own* completion
+   handler — so a listener attached later records the print *after* the key that waited for it, and
+   reports a **correct** build as broken. That failure is what caught it.
+
+**Six of the twelve survivors lived in one layer**: the four adapters between the decoder and the
+wire (`print`, `sendKey`, `getKeymap`, `onError`) plus the Enter dispatch. `typing.test.mjs`
+replaces that layer with a fake host; `ime.test.mjs` ran through it without observing it. **Ask
+which layer your tests stop at** — here it was the assembler in the middle, which is the only layer
+the user meets.
+
+**The test host can now be slow and can fail.** While the stub answered 200 instantly, the queue's
+whole failure path was unreachable from the browser suite and every ordering window was
+sub-millisecond.
+
+**Four assertions matched the SOURCE TEXT of `keyboard.js` and could not fail** — a build with the
+statements disabled, the reset made synchronous, or the keymap hardcoded left every one of them
+matching. Each is now a real test or gone.
+
+**Status: 11 of 12 killed, each canaried.** The twelfth is Deferred #13.
 
 ## Surprises
 
@@ -168,7 +206,8 @@ a Phase 8 item rather than a fix here.
 | 9 | **`__bar_keys.clear()` on blur can release a latched modifier**: an unmatched keyup then reaches `__keypad.emit(code,false)`, whose last act is `__unholdAll()`. | Narrow (a key physically held as focus leaves). Fixing it means the bar reaching into Keypad's latch state. |
 | 10 | **Undo, drag-drop and multi-line paste reach the host unannounced.** A single-line `<input>` flattens newlines before the handler sees them, so a three-line snippet becomes one command; the Text panel confirms first, the bar does not. | The confirmation question is the same one as #5. |
 | 11 | **The Clear button is a no-op and the placeholder is never seen** in the default flow — the field is reset after every edit, and `show_hook` focuses it (installing padding) the moment the keyboard opens. | Cosmetic, but the "×" occupies a 46px target that does nothing. |
-| 12 | **The mutation sweep.** | Two attempts died — an auth failure, then load average 308. A third is running against `619a35b3` on a quiet machine; **if no result is recorded below this line, it did not finish, and nobody has measured which of these tests prove nothing.** |
+| 12 | **The mutation sweep ran** — 26 mutations, 12 survivors, 11 now killed. | Done. See *The sweep*. |
+| 13 | **`__recordPrintEvent` being dropped is still not caught** — the recorder integration is unobserved. | Blocked by an instrument limit Phase 6 already documented: `recorder.js` stops recording on `setSocket(null)`, which a page with no kvmd behind it reaches **700–1200 ms after load**. Testing it needs a stub socket, which is the same work as Deferred #1. Lowest consequence of the twelve — a recording gap, not a host-safety one. |
 
 Carried from Phase 6 and still open: the plan's register rows 1–18.
 
@@ -205,6 +244,17 @@ field first.
 
 **The padding is invisible but the field is never empty while focused**, so `placeholder` will not
 render and `value.length` is never 0. Compare `value.replace(/​/gu, "")`.
+
+🔴 **Commit before canarying.** A canary loop whose restore runs `git checkout -- testenv/` reverts
+the **uncommitted tests it is testing**. 📏 This was walked into an hour after writing the Phase 6
+warning about it in this very file: the first mutation was measured against 18 tests and the next
+seven against the 10 that were committed, so all seven reported "SURVIVED". Seven survivors in a row
+is a broken harness, not seven bad tests — check the baseline test COUNT inside the loop.
+
+**An expectation of NOTHING must wait out its whole window**, and a cue that expires must be waited
+FOR, not sampled once. Two flakes here: a mute test that stopped at the first print and so never saw
+the second one it was meant to forbid, and a failure-cue assertion sampled after a wait longer than
+the cue's own 2-second expiry.
 
 **`make pug` needs Docker**, but `npx --yes pug-cli@1.0.0-alpha6 --pretty web/kvm/index.pug -o web/kvm`
 reproduces the committed HTML byte-for-byte. Nothing in the suite checks the HTML still matches the
