@@ -24,10 +24,11 @@
 
 
 import {tools, $} from "../tools.js";
-import {HOVER_QUERY} from "../ui.js";
+import {HOVER_QUERY, UI_MOBILE} from "../ui.js";
 import {wm} from "../wm.js";
 import {Keypad} from "../keypad.js";
 import {TouchGestures} from "../gestures.js";
+import {makeZoom, ZOOM_MIN, ZOOM_MAX} from "./zoom.js";
 
 
 // A real click has a duration. It also makes the on-screen Left button visibly
@@ -51,6 +52,8 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __keypad = null;
 	var __gestures = null;
+	var __zoom = null;
+	var __pinch = null; // The previous two-finger frame, while one is in progress
 
 	var __timer = null;
 
@@ -65,6 +68,16 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __init__ = function() {
 		__keypad = new Keypad($("mouse-buttons"), __sendButton);
+		__zoom = new makeZoom();
+
+		// Where the view starts on every load. A phone cannot read a 1920x1080
+		// console at 1x -- 4.8px per character -- and zooming in by hand after
+		// every page load is not a thing anyone should have to do.
+		tools.storage.bindSimpleSlider($("stream-zoom-slider"), "stream.zoom", ZOOM_MIN, ZOOM_MAX, 0.25, 2, function(value) {
+			$("stream-zoom-value").innerText = `${Math.round(value * 100)}%`;
+			__resetZoom(value);
+		});
+
 		__gestures = new TouchGestures({
 			"onClick": __touchClick,
 			// "A right click is ready; lift to send it." The keypad learned
@@ -272,6 +285,45 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		}
 	};
 
+	// The picture, moved and scaled. Not the box: the overlays inside it are
+	// positioned in the box's own coordinates and would be dragged off with it.
+	var __applyZoom = function() {
+		let z = __zoom.get();
+		let css = (z.scale === ZOOM_MIN ? "" : `translate(${Math.round(z.x)}px, ${Math.round(z.y)}px) scale(${z.scale})`);
+		for (let id of ["stream-image", "stream-video", "stream-canvas"]) {
+			$(id).style.transform = css;
+		}
+	};
+
+	var __resetZoom = function(scale) {
+		let box = $("stream-box").getBoundingClientRect();
+		__zoom.setViewport(box.width, box.height);
+		__zoom.reset();
+		if (document.documentElement.getAttribute("data-ui") === UI_MOBILE && scale > ZOOM_MIN) {
+			// Anchored at the top-left, where a console's prompt is.
+			__zoom.pinch(scale, {"x": 0, "y": 0});
+		}
+		__applyZoom();
+	};
+
+	// Where a touch is on the PICTURE, which is what the host is told about. At
+	// 1x this is where the finger is; zoomed in, it is not, and a click that
+	// skips this lands a third of the way to where you meant it.
+	var __streamPosition = function(client_x, client_y) {
+		let rect = $("stream-box").getBoundingClientRect();
+		return __zoom.toPicture({"x": client_x - rect.left, "y": client_y - rect.top});
+	};
+
+	var __twoFingers = function(ev) {
+		let a = ev.targetTouches[0];
+		let b = ev.targetTouches[1];
+		return {
+			"dist": Math.max(1, Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)),
+			"x": (a.clientX + b.clientX) / 2,
+			"y": (a.clientY + b.clientY) / 2,
+		};
+	};
+
 	var __streamTouchMoveHandler = function(ev) {
 		if (ev.targetTouches.length === 1) {
 			ev.preventDefault();
@@ -290,23 +342,19 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 				});
 				__touch_pos = pos;
 			}
-		} else if (ev.touches.length >= 2) {
-			if (__touch_pos === null) {
-				__touch_pos = pos;
-			} else {
-				let dx = __touch_pos.x - pos.x;
-				let dy = __touch_pos.y - pos.y;
-				if (Math.abs(dx) < 15) {
-					dx = 0;
-				}
-				if (Math.abs(dy) < 15) {
-					dy = 0;
-				}
-				if (dx || dy) {
-					__sendScroll({"x": dx, "y": dy});
-					__touch_pos = null;
-				}
+		} else if (ev.targetTouches.length >= 2) {
+			// Two fingers move the VIEW, not the host: pinch to zoom, drag to
+			// pan. The host's wheel is the Up/Down pair on the mouse pad, which
+			// needs no gesture and cannot be claimed by the browser.
+			let now = __twoFingers(ev);
+			if (__pinch !== null) {
+				let rect = $("stream-box").getBoundingClientRect();
+				__zoom.setViewport(rect.width, rect.height);
+				__zoom.pan(now.x - __pinch.x, now.y - __pinch.y);
+				__zoom.pinch(now.dist / __pinch.dist, {"x": now.x - rect.left, "y": now.y - rect.top});
+				__applyZoom();
 			}
+			__pinch = now;
 			__abs_pos = null;
 		}
 	};
@@ -323,6 +371,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		if (ev.targetTouches.length === 0) {
 			__gesture_live = false;
 		}
+		if (ev.targetTouches.length < 2) {
+			__pinch = null;
+		}
 	};
 
 	var __streamTouchCancelHandler = function(ev) {
@@ -331,6 +382,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		}
 		__sendPlannedMove();
 		__touch_pos = null;
+		__pinch = null;
 		if (ev.targetTouches.length === 0) {
 			__gesture_live = false;
 		}
@@ -390,23 +442,17 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __getTouchPosition = function(ev, index) {
-		if (ev.touches[index].target && ev.touches[index].target.getBoundingClientRect) {
-			let rect = ev.touches[index].target.getBoundingClientRect();
-			return {
-				"x": Math.round(ev.touches[index].clientX - rect.left),
-				"y": Math.round(ev.touches[index].clientY - rect.top),
-			};
-		}
-		return null;
+		let touch = ev.touches[index];
+		// Against the BOX, never against ev.target: the target is whichever of
+		// the stacked picture elements was under the finger, and each of them
+		// carries the zoom transform, so its own rect is already scaled.
+		return (touch ? __streamPosition(touch.clientX, touch.clientY) : null);
 	};
 
 	var __streamMoveHandler = function(ev) {
 		if (__abs) {
-			let rect = ev.target.getBoundingClientRect();
-			__abs_pos = {
-				"x": Math.max(Math.round(ev.clientX - rect.left), 0),
-				"y": Math.max(Math.round(ev.clientY - rect.top), 0),
-			};
+			let pos = __streamPosition(ev.clientX, ev.clientY);
+			__abs_pos = {"x": Math.max(pos.x, 0), "y": Math.max(pos.y, 0)};
 		} else if (__isRelativeCaptured()) {
 			__sendOrPlanRelativeMove({
 				"x": ev.movementX,
@@ -451,6 +497,10 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	/************************************************************************/
 
 	var __sendOrPlanRelativeMove = function(delta) {
+		// Zoomed in, a finger crossing 30px of glass has crossed 15px of the
+		// host's screen. Without this the cursor runs away from the finger.
+		let scale = __zoom.get().scale;
+		delta = {"x": delta.x / scale, "y": delta.y / scale};
 		let sens = $("hid-mouse-sens-slider").valueAsNumber;
 		let boost = $("hid-mouse-boost-slider").valueAsNumber;
 		delta = {

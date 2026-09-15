@@ -97,6 +97,14 @@ li.right#system-dropdown
 					])
 
 		+menu_spoiler("Video quality settings")
+			//- Compact only. A 1920x1080 console on a 390px phone is 4.8px per
+			//- character, and the picture is pixels -- there is no font to make
+			//- bigger. This is where the view starts on every load, so nobody
+			//- has to zoom in again after each one.
+			table.kv#stream-zoom-row
+				tr
+					td Zoom the console by:
+					td.slider #[+menu_slider("stream-zoom-slider", "stream-zoom-value")]
 			table.kv
 				tr
 					td FPS limit:

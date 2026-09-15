@@ -717,6 +717,105 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 	});
 });
 
+describe("the console is already zoomed when a phone opens it", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// The picture is pixels: a 1920x1080 console on a 390px phone is 4.8px per
+	// character and there is no font to change. Zooming in by hand after every
+	// page load is not a thing anyone should have to do, so the view starts
+	// where the user left the setting.
+	const PICTURE = `(() => {
+		const img = document.getElementById("stream-image");
+		return {
+			"transform": getComputedStyle(img).transform,
+			"slider": document.getElementById("stream-zoom-slider").value,
+			"label": document.getElementById("stream-zoom-value").innerText,
+		};
+	})()`;
+
+	test("a phone starts zoomed in, a desktop does not", async () => {
+		const phone = await open(390);
+		const on_phone = await phone.eval(PICTURE);
+		await phone.close();
+		const desk = await open(1280, {"touch": false, "height": 900});
+		const on_desk = await desk.eval(PICTURE);
+		await desk.close();
+
+		assert.match(on_phone.transform, /^matrix\(2,/,
+			`the console opened at ${on_phone.transform} on a phone`);
+		assert.equal(on_phone.label, "200%", "the setting has to say what it did");
+		assert.equal(on_desk.transform, "none", "the desktop console must not be zoomed");
+	});
+
+	test("two fingers zoom further and pan, and neither reaches the host", async () => {
+		const pg = await open(390);
+		await pg.eval(HID_START);
+		const box = await pg.eval(centre("#stream-box"));
+		const spread = async (from, to) => {
+			await pg.touch("touchStart", [{"x": box.x - from, "y": box.y, "id": 1}, {"x": box.x + from, "y": box.y, "id": 2}]);
+			// Two frames: the first has no previous frame to measure against.
+			await pg.touch("touchMove", [{"x": box.x - (from + to) / 2, "y": box.y, "id": 1}, {"x": box.x + (from + to) / 2, "y": box.y, "id": 2}]);
+			await pg.touch("touchMove", [{"x": box.x - to, "y": box.y, "id": 1}, {"x": box.x + to, "y": box.y, "id": 2}]);
+			await pg.touch("touchEnd", []);
+		};
+		await spread(40, 110);
+		const zoomed = await pg.eval(PICTURE);
+		await pg.touch("touchStart", [{"x": box.x - 40, "y": box.y, "id": 1}, {"x": box.x + 40, "y": box.y, "id": 2}]);
+		await pg.touch("touchMove", [{"x": box.x - 40, "y": box.y - 30, "id": 1}, {"x": box.x + 40, "y": box.y - 30, "id": 2}]);
+		await pg.touch("touchMove", [{"x": box.x - 40, "y": box.y - 70, "id": 1}, {"x": box.x + 40, "y": box.y - 70, "id": 2}]);
+		await pg.touch("touchEnd", []);
+		const panned = await pg.eval(PICTURE);
+		const sent = (await hidSettled(pg, 0, 1000)).filter((what) => what.startsWith("mouse "));
+		await pg.close();
+
+		const scaleOf = (t) => Number(t.slice(t.indexOf("(") + 1).split(",")[0]);
+		assert.ok(scaleOf(zoomed.transform) > 2.2,
+			`a spread took the console to ${zoomed.transform}`);
+		assert.notEqual(panned.transform, zoomed.transform, "a two-finger drag did not pan the view");
+		assert.deepEqual(sent, [], "two fingers moved the view -- they must send nothing to the host");
+	});
+
+	test("a tap lands where the finger is, not where it would be at 1x", async () => {
+		// The one that matters: zoomed 2x from the top-left, 100px along the
+		// glass is 50px into the host's screen. A click that skips that lands a
+		// long way from where it was meant.
+		const at = async function(zoom) {
+			const pg = await open(390);
+			await pg.eval(`(() => {
+				const el = document.getElementById("stream-zoom-slider");
+				el.value = "${zoom}";
+				el.dispatchEvent(new Event("input", {"bubbles": true}));
+				el.dispatchEvent(new Event("change", {"bubbles": true}));
+				window.__abs = [];
+				const real = console.log;
+				console.log = function(...args) {
+					if (String(args[1]) === "Mouse: abs:") {
+						window.__abs.push(args[2]);
+					}
+					return real.apply(console, args);
+				};
+				return true;
+			})()`);
+			const box = await pg.eval(`(() => {
+				const r = document.getElementById("stream-box").getBoundingClientRect();
+				return {"left": Math.round(r.left), "top": Math.round(r.top)};
+			})()`);
+			await pg.touch("touchStart", [{"x": box.left + 100, "y": box.top + 50}]);
+			await pg.touch("touchEnd", []);
+			await new Promise((done) => setTimeout(done, 250));
+			const abs = await pg.eval(`window.__abs`);
+			await pg.close();
+			assert.equal(abs.length >= 1, true, `no absolute move was sent at ${zoom}x`);
+			return abs[0];
+		};
+		const plain = await at(1);
+		const zoomed = await at(2);
+		// Both are remapped into the HID range, so compare their positions
+		// within it rather than raw pixels: half the distance from the left
+		// edge is a smaller number, always.
+		assert.ok(zoomed.x < plain.x && zoomed.y < plain.y,
+			`the same tap reported ${JSON.stringify(zoomed)} zoomed and ${JSON.stringify(plain)} at 1x -- the zoom is not in the mapping`);
+	});
+});
+
 describe("text recognition works without a pointer", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
 	// Opening it the way the Text menu does. The feature is hardware-gated and
 	// the app re-applies that gate about a second after load, so the reveal and

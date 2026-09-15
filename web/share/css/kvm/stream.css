@@ -226,3 +226,23 @@ div#webterm-window iframe {
 	transform: scale(var(--webterm-scale));
 	transform-origin: top left;
 }
+
+
+/* The console zoom is a phone's answer to a 1920x1080 screen on 390px; a
+   desktop has the room and does not need the setting cluttering its menu. */
+table#stream-zoom-row {
+	display: none;
+}
+
+:root[data-ui="mobile"] table#stream-zoom-row {
+	display: table;
+}
+
+/* The picture is what zooms -- not the box, and not the overlays on top of it
+   (the OCR selection, the magic-key hint), which are positioned in the box's
+   own coordinates and would be dragged off with it. */
+div#stream-box > img#stream-image,
+div#stream-box > video#stream-video,
+div#stream-box > canvas#stream-canvas {
+	transform-origin: top left;
+}
