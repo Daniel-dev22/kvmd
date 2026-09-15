@@ -102,6 +102,19 @@ test("a region already inside the band is left alone", () => {
 	assert.deepEqual(followPan({"view": VIEW, "viewport": BOX, "region": region}), {"dx": 0, "dy": 0});
 });
 
+test("a region inside the box but inside the MARGIN is still pulled in", () => {
+	// 📏 The test above passes whether or not the band exists: its region is
+	// comfortable either way. This is what the margin is actually for -- the
+	// cursor is technically on screen, but pressed against the edge, and
+	// waiting until it leaves the box entirely is waiting too long.
+	// Box 400 wide at 2x: the band ends at 320, the picture at 400.
+	const region = {"x": 0.4, "y": 0.2, "w": 0.05, "h": 0.05};
+	const move = followPan({"view": VIEW, "viewport": BOX, "region": region});
+	assert.equal(move.dy, 0, "it must not drift vertically for a horizontal problem");
+	assert.equal(move.dx, BOX.width * (1 - FOLLOW_MARGIN) - 0.45 * BOX.width * VIEW.scale);
+	assert.ok(move.dx < 0, `expected a pull towards the centre, got ${move.dx}`);
+});
+
 test("a region past the bottom of the box pans the picture up", () => {
 	const region = {"x": 0.2, "y": 0.9, "w": 0.05, "h": 0.05};
 	const move = followPan({"view": VIEW, "viewport": BOX, "region": region});
