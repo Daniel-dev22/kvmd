@@ -36,12 +36,20 @@ test("the size is derived from the columns it has to leave, not chosen by eye", 
 	}
 });
 
-test("a narrower phone never gets smaller type, only fewer columns", () => {
-	// The floor is the point of the exercise: shrinking the font to keep 30
-	// columns on a 320px screen would put it back where it was unreadable.
-	assert.equal(webtermFontSize(320), WEBTERM_FONT_MIN_PX);
-	assert.ok(webtermFontSize(390) > webtermFontSize(320)
-		|| webtermFontSize(390) === WEBTERM_FONT_MIN_PX);
+test("a narrower phone gets fewer columns, never smaller type", () => {
+	// The bounds are what stop the column target from being followed off a
+	// cliff in either direction -- back to unreadable on a narrow phone, or to
+	// a font meant for a watch on a tablet.
+	assert.equal(webtermFontSize(200), WEBTERM_FONT_MIN_PX, "a very narrow screen must hit the floor");
+	assert.equal(webtermFontSize(2000), WEBTERM_FONT_MAX_PX, "a very wide one must hit the ceiling");
+	assert.ok(webtermFontSize(390) >= webtermFontSize(320),
+		"a wider screen must never get smaller type");
+});
+
+test("the size a 390px phone actually gets", () => {
+	// The number the device was judged on. If the constants move, this is the
+	// reading that has to be re-taken on a phone rather than re-derived here.
+	assert.equal(webtermFontSize(390), 30);
 });
 
 test("the desktop keeps the terminal's own default", () => {
