@@ -43,6 +43,7 @@ test("a browser is available to drive an IME", () => {
 
 const HOST_START = `(() => {
 	window.__host = [];
+	window.__timeouts = [];
 	const real = console.log;
 	console.log = function(...args) {
 		const m = args.join(" ").match(/Keyboard: key (pressed|released): (\\S+)/);
@@ -57,12 +58,34 @@ const HOST_START = `(() => {
 		const open = x.open.bind(x);
 		const send = x.send.bind(x);
 		let url = null;
-		x.open = (m, u, a) => { url = u; return open(m, u, a); };
-		x.send = (body) => {
-			if (url !== null && url.includes("api/hid/print")) {
-				window.__host.push("print " + JSON.stringify(body));
+		let body = null;
+		// Registered HERE, at construction, so it runs before the handler the
+		// page attaches -- listeners fire in registration order, and the page
+		// dispatches the next queued key from inside its own. Attached any
+		// later, this records the print AFTER the key that waited for it and
+		// reports a correct build as broken.
+		//
+		// And on COMPLETION, never on dispatch: recorded at dispatch, "in
+		// flight" is unobservable, so a build that fires Enter the moment it is
+		// pressed -- this phase's own headline defect -- logs in exactly the
+		// same order as one that queues it.
+		// 📏 Measured: with this at send(), reintroducing the immediate Enter
+		// survived all 278 tests; with it here, that build fails with
+		// ["key Enter down","key Enter up","print \"ls -la\""].
+		x.addEventListener("readystatechange", function() {
+			if (x.readyState === 4 && url !== null && url.includes("api/hid/print")) {
+				window.__host.push(
+					(x.status === 200 ? "print " : "print-failed:" + x.status + " ")
+					+ JSON.stringify(body));
 			}
-			return send(body);
+		});
+		x.open = (m, u, a) => { url = u; return open(m, u, a); };
+		x.send = (b) => {
+			body = b;
+			if (url !== null && url.includes("api/hid/print")) {
+				window.__timeouts.push(x.timeout);
+			}
+			return send(b);
 		};
 		return x;
 	};
@@ -79,6 +102,7 @@ async function openTyping() {
 	await pg.setViewport(390, 844, true);
 	await pg.setTouch(true, 5);
 	await pg.clearStorage(server.origin);
+	server.reset();
 	await pg.goto(`${server.origin}/${KVM}?debug=1`);
 	await pg.eval(`document.getElementById("mouse-window-keyboard-button").click()`);
 	await pg.eval("new Promise((r) => setTimeout(r, 200))");
@@ -141,9 +165,12 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		await pg.compose("he");
 		const host = await hostSettled(pg, 4);
 		await pg.close();
-		assert.deepEqual(host.slice(-2), ["key Backspace down", "key Backspace up"],
-			`the host received: ${JSON.stringify(host)}`);
 		assert.equal(typed(host), "hel", "the deletion must not retype the line");
+		// Every key, not just the last two -- a slice hides a duplicate or an
+		// out-of-order event that happened earlier.
+		assert.deepEqual(host.filter((e) => e.startsWith("key ")),
+			["key Backspace down", "key Backspace up"],
+			`the host received: ${JSON.stringify(host)}`);
 	});
 
 	test("a Backspace with nothing but padding in the field still reaches the host", async () => {
@@ -160,7 +187,8 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		await pg.key("Backspace", "Backspace", 8);
 		const host = await hostSettled(pg, 3);
 		await pg.close();
-		assert.deepEqual(host.slice(-2), ["key Backspace down", "key Backspace up"],
+		assert.deepEqual(host.filter((e) => e.startsWith("key ")),
+			["key Backspace down", "key Backspace up"],
 			`the host received: ${JSON.stringify(host)}`);
 	});
 
@@ -235,6 +263,136 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		const host = await hostSettled(pg, 0, 900);
 		await pg.close();
 		assert.deepEqual(host, [], `a muted HID received: ${JSON.stringify(host)}`);
+	});
+
+	// A host that answers instantly makes "in flight" sub-millisecond, and every
+	// ordering claim this phase makes lives inside that window. These hold it
+	// open on purpose. Each carries the mutation that proved it was missing.
+
+	test("Backspace goes through the queue, not straight out as a scancode", async () => {
+		// 📏 Swapping Backspace for Delete in the bar's claimed-key list -- which
+		// hands Backspace to the window handler, firing it over the websocket
+		// the instant it is pressed -- survived all 278 tests. Asserting that a
+		// Backspace ARRIVED cannot tell the two paths apart.
+		const pg = await openTyping();
+		server.control.printDelayMs = 300;
+		await pg.commit("abc");
+		await pg.key("Backspace", "Backspace", 8);
+		const host = await hostSettled(pg, 3);
+		await pg.close();
+		assert.deepEqual(host, ["print \"abc\"", "key Backspace down", "key Backspace up"],
+			`the Backspace overtook the text it was meant to erase: ${JSON.stringify(host)}`);
+	});
+
+	test("a failed print drops the Enter that was queued behind it", async () => {
+		// 📏 While the stub could only answer 200, the queue's failure path was
+		// unreachable from the browser suite -- so a build reporting every
+		// failure as success survived, with the orphaned Enter this phase names
+		// as its worst case live again.
+		const pg = await openTyping();
+		server.control.printStatus = 500;
+		await pg.commit("rm -rf /tmp/x");
+		await pg.key("Enter", "Enter", 13);
+		const host = await hostSettled(pg, 0, 1500);
+		const failed = await pg.eval(`${FIELD}.hasAttribute("data-failed")`);
+		await pg.close();
+		assert.equal(host.filter((e) => e.startsWith("key Enter")).length, 0,
+			`an orphaned Enter reached the host: ${JSON.stringify(host)}`);
+		assert.ok(failed, "a failure the user cannot see is one they will retype into");
+	});
+
+	test("the keymap on the request is the one the selector holds", async () => {
+		// 📏 Hardcoding "en-us" survived: the only assertions were a match on
+		// the source text and one that the parameter EXISTS. Every non-US user
+		// types the wrong characters.
+		const pg = await openTyping();
+		await pg.eval(`(() => { const el = document.getElementById("hid-pak-keymap-selector");
+			el.innerHTML = '<option value="de">de</option>'; el.value = "de"; return el.value; })()`);
+		await pg.commit("z");
+		await hostSettled(pg, 1);
+		await pg.close();
+		assert.match(server.printed.at(-1).url, /keymap=de(&|$)/,
+			`the request carried: ${server.printed.at(-1).url}`);
+		assert.equal(server.printed.at(-1).body, "z");
+	});
+
+	test("an interactive print does not inherit the paste timeout", async () => {
+		// 📏 printText's default is 7*24*3600 -- seconds written into a
+		// milliseconds parameter, so "a week" is ten minutes, and every key
+		// behind it in the queue waits that long. Nothing asserted it.
+		const pg = await openTyping();
+		await pg.commit("x");
+		await hostSettled(pg, 1);
+		const timeouts = await pg.eval("window.__timeouts");
+		await pg.close();
+		assert.deepEqual(timeouts, [15000], `the print's timeout was ${JSON.stringify(timeouts)}`);
+	});
+
+	test("a deletion is seen even when the engine reports no inputType", async () => {
+		// Blink always supplies one, so the padding mechanism -- the whole
+		// reason this field is never empty -- cannot be reached through the IME
+		// path at all, and 📏 a build that stopped tracking it survived. This
+		// drives the glue the way an engine that omits inputType would: the
+		// padding is one character shorter and nothing else changed.
+		const pg = await openTyping();
+		await pg.eval(`(() => { const el = ${FIELD};
+			el.value = el.value.slice(0, -1);
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			return true; })()`);
+		const host = await hostSettled(pg, 2);
+		await pg.close();
+		assert.deepEqual(host, ["key Backspace down", "key Backspace up"],
+			`the host received: ${JSON.stringify(host)}`);
+	});
+
+	test("an AltGr character belongs to the bar, not to the scancode path", async () => {
+		// 📏 Removing the AltGr exemption survived -- the claim had no test at
+		// all. AltGr is Ctrl+Alt on Windows and Linux, so testing those flags
+		// alone refuses every AltGr character and sends it as a raw scancode
+		// for the HOST's layout to reinterpret: the second keymap the print
+		// path exists to avoid. CDP cannot set AltGraph, so the event is
+		// constructed -- which runs no default action, and is why this asserts
+		// what did NOT go out rather than what was typed.
+		const pg = await openTyping();
+		await pg.eval(`${FIELD}.dispatchEvent(new KeyboardEvent("keydown", {
+			bubbles: true, key: "@", code: "KeyQ",
+			ctrlKey: true, altKey: true, modifierAltGraph: true}))`);
+		const host = await hostSettled(pg, 0, 700);
+		await pg.close();
+		assert.deepEqual(host, [],
+			`an AltGr character went out as a scancode: ${JSON.stringify(host)}`);
+	});
+
+	test("the field is not reset under an edit that is still being delivered", async () => {
+		// Mutating the value inside the handler is how an IME ends up
+		// duplicating what it just inserted, so the reset waits for the next
+		// task. 📏 Making it synchronous survived: the only assertion on this
+		// was a match against its own comment.
+		const pg = await openTyping();
+		const seen = await pg.eval(`(() => { const el = ${FIELD};
+			el.value = el.value + "q";
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			return el.value.replace(/\u200b/gu, "");
+		})()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 120))");
+		const after = await pg.eval(`${FIELD}.value.replace(/\u200b/gu, "")`);
+		await pg.close();
+		assert.equal(seen, "q", "the field was reset inside the handler still delivering the edit");
+		assert.equal(after, "", "the field never went back to its padding");
+	});
+
+	test("muting after text is queued stops it reaching the host", async () => {
+		// __onEdit gates on mute before queueing, so the adapter's own check
+		// only matters for work queued BEFORE the switch flipped -- which no
+		// test exercised, and 📏 a build without it survived.
+		const pg = await openTyping();
+		server.control.printDelayMs = 250;
+		await pg.commit("aaa");
+		await pg.commit("bbb");
+		await pg.eval(`document.getElementById("hid-mute-switch").checked = true`);
+		const host = await hostSettled(pg, 1, 1800);
+		await pg.close();
+		assert.equal(typed(host), "aaa", `a muted HID received: ${JSON.stringify(host)}`);
 	});
 
 	test("the field never accumulates a transcript", async () => {

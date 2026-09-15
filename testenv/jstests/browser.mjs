@@ -39,6 +39,8 @@ export async function serveWeb() {
 	// Everything the page sends to api/hid/print, in order, so a test can read
 	// what the host would have received.
 	const printed = [];
+	// Mutable so a test can make the host slow or broken; reset per test.
+	const control = {"printStatus": 200, "printDelayMs": 0};
 	const server = createServer(async (req, res) => {
 		const rel = decodeURIComponent(req.url.split("?")[0]);
 		// The ONE endpoint that has to answer. Everything else in kvmd's API is
@@ -51,7 +53,19 @@ export async function serveWeb() {
 			for await (const chunk of req) {
 				chunks.push(chunk);
 			}
-			printed.push(Buffer.concat(chunks).toString("utf-8"));
+			printed.push({"body": Buffer.concat(chunks).toString("utf-8"), "url": req.url});
+			// A stub that can only succeed makes the queue's whole failure path
+			// -- and the 200 check that feeds it -- unreachable from the browser
+			// suite, so a build reporting every failure as success passes. And
+			// one that answers instantly makes "in flight" sub-millisecond,
+			// which is the window every ordering claim lives in.
+			if (control.printDelayMs > 0) {
+				await new Promise((done) => setTimeout(done, control.printDelayMs));
+			}
+			if (control.printStatus !== 200) {
+				res.writeHead(control.printStatus).end("nope");
+				return;
+			}
 			res.writeHead(200, {"Content-Type": "application/json"});
 			res.end(JSON.stringify({"ok": true, "result": {}}));
 			return;
@@ -70,6 +84,12 @@ export async function serveWeb() {
 	return {
 		"origin": `http://127.0.0.1:${server.address().port}`,
 		"printed": printed,
+		"control": control,
+		"reset": () => {
+			printed.length = 0;
+			control.printStatus = 200;
+			control.printDelayMs = 0;
+		},
 		"close": () => new Promise((done) => server.close(done)),
 	};
 }

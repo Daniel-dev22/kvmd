@@ -10,11 +10,14 @@ on the appliance against the branch.
 **Read first:** `MOBILE_UI_PHASE3_HANDOFF.md` (this phase REVERSES its central decision) and
 `MOBILE_UI_PHASE6_HANDOFF.md`.
 
-**278 tests, 276 passing** — `CHROMIUM=/snap/bin/chromium node --test testenv/jstests/*.test.mjs`.
-The two failures (`the fn layer fits a 320px screen`, `a phone that has already chosen a zoom keeps
-it`) are **load casualties**: both pass in isolation, and the full run was taken at **load average
-308 on 8 cores** with a peer session's two JVM build daemons holding 8.8 GB. Neither is in this
-phase's area. Re-run on a quiet machine before trusting any number here.
+**278 tests, 278 passing, 0 skipped, 59.6 s** — `CHROMIUM=/snap/bin/chromium node --test
+testenv/jstests/*.test.mjs`, on a quiet machine (load 0.8, 17 GB available).
+
+📏 An earlier run of the same tree reported **276/278**. Both failures (`the fn layer fits a 320px
+screen`, `a phone that has already chosen a zoom keeps it`) were **load casualties** — taken at
+**load average 308 on 8 cores** while a peer session held 8.8 GB in two JVM build daemons; the same
+run took **324 s** for a suite that takes 35 s. Both passed in isolation and both pass in the clean
+run. Neither is in this phase's area. **Check `uptime` before trusting any suite number here.**
 
 ---
 
@@ -165,7 +168,7 @@ a Phase 8 item rather than a fix here.
 | 9 | **`__bar_keys.clear()` on blur can release a latched modifier**: an unmatched keyup then reaches `__keypad.emit(code,false)`, whose last act is `__unholdAll()`. | Narrow (a key physically held as focus leaves). Fixing it means the bar reaching into Keypad's latch state. |
 | 10 | **Undo, drag-drop and multi-line paste reach the host unannounced.** A single-line `<input>` flattens newlines before the handler sees them, so a three-line snippet becomes one command; the Text panel confirms first, the bar does not. | The confirmation question is the same one as #5. |
 | 11 | **The Clear button is a no-op and the placeholder is never seen** in the default flow — the field is reset after every edit, and `show_hook` focuses it (installing padding) the moment the keyboard opens. | Cosmetic, but the "×" occupies a 46px target that does nothing. |
-| 12 | **No mutation sweep was run.** | Both attempts died — an auth failure, then load average 308. **Run it first in Phase 8.** |
+| 12 | **The mutation sweep.** | Two attempts died — an auth failure, then load average 308. A third is running against `619a35b3` on a quiet machine; **if no result is recorded below this line, it did not finish, and nobody has measured which of these tests prove nothing.** |
 
 Carried from Phase 6 and still open: the plan's register rows 1–18.
 
