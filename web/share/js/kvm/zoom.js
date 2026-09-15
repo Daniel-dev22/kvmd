@@ -39,6 +39,26 @@ export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 4;
 
 
+// Where a picture of `nw`x`nh` sits inside a `bw`x`bh` box under `object-fit:
+// contain` -- scaled to fit and centred, with a letterbox on whichever axis has
+// room left over.
+//
+// Every box-to-picture mapping needs this and none of them may disagree: a tap
+// is sent to the host in picture coordinates, the OCR selection is read in
+// them, and the follower pans by them. The letterbox is the whole difference
+// between the two spaces and it is not small -- 1920x1080 contained in a
+// 390x844 full-tab window leaves 312px of black above and below.
+export function containFit(nw, nh, bw, bh) {
+	let ratio = Math.min(bw / nw, bh / nh);
+	return {
+		"x": Math.round((bw - ratio * nw) / 2),
+		"y": Math.round((bh - ratio * nh) / 2),
+		"width": Math.round(ratio * nw),
+		"height": Math.round(ratio * nh),
+	};
+}
+
+
 export function makeZoom() {
 	var self = this;
 

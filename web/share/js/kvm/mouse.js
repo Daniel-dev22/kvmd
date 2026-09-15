@@ -28,7 +28,7 @@ import {HOVER_QUERY, UI_MOBILE} from "../ui.js";
 import {wm} from "../wm.js";
 import {Keypad} from "../keypad.js";
 import {TouchGestures} from "../gestures.js";
-import {makeZoom, ZOOM_MIN, ZOOM_MAX} from "./zoom.js";
+import {makeZoom, containFit, ZOOM_MIN, ZOOM_MAX} from "./zoom.js";
 import {changedRegion, shouldFollow, followPan, FOLLOW_COLS, FOLLOW_ROWS, FOLLOW_HZ, FOLLOW_MANUAL_HOLD_MS} from "./follow.js";
 
 
@@ -293,6 +293,10 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchStartHandler = function(ev) {
+		// Any touch on the video means the user is working there -- with one
+		// finger that IS the host's pointer, and moving the view under it moves
+		// what the finger maps to.
+		__follow_manual_ts = Date.now();
 		// One finger is ours: preventDefault stops the page panning under it and
 		// stops the browser replaying the whole gesture as mouse events. TWO is
 		// the browser's -- it is the only way to zoom into the host's console on
@@ -323,15 +327,17 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	// The picture, moved and scaled. Not the box: the overlays inside it are
 	// positioned in the box's own coordinates and would be dragged off with it.
-	var __applyZoom = function(smooth=false) {
+	// Applied with NO animation, deliberately. __zoom holds the destination the
+	// instant pan() returns, and every mapping -- toPicture for taps and
+	// absolute moves, and the OCR selection -- reads it. Animating the picture
+	// means a tap landing during those frames is sent to where the view is
+	// GOING rather than where the user sees it: 48 picture px of error at 2.5x,
+	// on the surface that presses buttons on someone else's server.
+	var __applyZoom = function() {
 		let z = __zoom.get();
 		let css = (z.scale === ZOOM_MIN ? "" : `translate(${Math.round(z.x)}px, ${Math.round(z.y)}px) scale(${z.scale})`);
 		for (let id of ["stream-image", "stream-video", "stream-canvas"]) {
-			let el = $(id);
-			// A gesture must track the fingers exactly, so only the follower --
-			// which moves the view on its own -- gets an animation.
-			el.style.transition = (smooth ? "transform 180ms ease-out" : "");
-			el.style.transform = css;
+			$(id).style.transform = css;
 		}
 	};
 
@@ -343,6 +349,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __follow_ctx = null;
 	var __follow_prev = null;
+	var __follow_el = null;
 	var __follow_timer = null;
 	var __follow_manual_ts = 0;
 	var __follow_broken = false;
@@ -368,19 +375,65 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		return null;
 	};
 
+	// Where the sampled picture sits inside the box. Measured from the ELEMENT
+	// rather than from the streamer's reported resolution: drawImage took its
+	// bitmap from this element, so this is the only source that cannot
+	// disagree with what was sampled -- and it answers before the streamer has
+	// reported a resolution at all, which is most of a page's first seconds.
+	var __followPicture = function(el, box) {
+		let nw = (el.naturalWidth || el.videoWidth || el.width || 0);
+		let nh = (el.naturalHeight || el.videoHeight || el.height || 0);
+		if (nw <= 0 || nh <= 0) {
+			return null;
+		}
+		return containFit(nw, nh, box.width, box.height);
+	};
+
 	var __followTick = function() {
-		let z = __zoom.get();
-		let el = __followElement();
-		if (el === null || z.scale <= ZOOM_MIN || document.hidden) {
-			// Nothing to compare the next frame against: a sample taken before
-			// a gap would report everything that happened during it as one
-			// enormous change.
+		// Everything that says "not now" is checked BEFORE the sample, because
+		// the sample is the only expensive part -- and every one of these
+		// clears the previous frame, since a sample taken across a gap reports
+		// everything that happened during it as one enormous change.
+		//
+		// The layout is re-read every tick rather than latched at start: it
+		// changes under us on rotation, on a resize across the compact
+		// breakpoint, and whenever the UI type is switched by hand, and a
+		// follower started once at load is either dead or running in the wrong
+		// layout afterwards.
+		if (document.hidden || document.documentElement.getAttribute("data-ui") !== UI_MOBILE) {
 			__follow_prev = null;
 			return;
 		}
+		// A zero-sized box means the stream window is closed. It also means
+		// setViewport(0, 0) would clamp the user's pan away to nothing.
+		let box = $("stream-box").getBoundingClientRect();
+		if (box.width === 0 || box.height === 0) {
+			__follow_prev = null;
+			return;
+		}
+		let z = __zoom.get();
+		if (z.scale <= ZOOM_MIN) {
+			__follow_prev = null;
+			return;
+		}
+		// A single finger on the video is the HOST's pointer. Panning under a
+		// drag in progress moves what the same finger position maps to, so the
+		// host's pointer jumps mid-drag and the selection lands somewhere the
+		// user never went.
 		if (Date.now() - __follow_manual_ts < FOLLOW_MANUAL_HOLD_MS) {
 			__follow_prev = null;
 			return;
+		}
+		let el = __followElement();
+		if (el === null) {
+			__follow_prev = null;
+			return;
+		}
+		if (el !== __follow_el) {
+			// mjpeg -> janus -> media: two renderings of the same console
+			// differ enough to look like a change that never happened.
+			__follow_prev = null;
+			__follow_el = el;
 		}
 
 		let now = null;
@@ -399,16 +452,23 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 		if (__follow_prev !== null) {
 			let region = changedRegion(__follow_prev, now, FOLLOW_COLS, FOLLOW_ROWS);
-			if (shouldFollow(region, z.scale)) {
-				let box = $("stream-box").getBoundingClientRect();
+			let picture = __followPicture(el, box);
+			if (shouldFollow(region, z.scale) && picture !== null) {
 				__zoom.setViewport(box.width, box.height);
 				let move = followPan({
-					"view": z, "region": region,
+					// setViewport clamps, and can have moved the picture since
+					// `z` was read -- a rotation widens the box and pulls it.
+					"view": __zoom.get(),
 					"viewport": {"width": box.width, "height": box.height},
+					// Where the picture actually SITS in that box: `object-fit:
+					// contain` letterboxes it, and the sample grid is of the
+					// picture, not of the box.
+					"picture": picture,
+					"region": region,
 				});
 				if (move.dx !== 0 || move.dy !== 0) {
 					__zoom.pan(move.dx, move.dy);
-					__applyZoom(true);
+					__applyZoom();
 				}
 			}
 		}
@@ -418,9 +478,6 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	var __followStart = function() {
 		if (__follow_timer !== null || __follow_broken) {
 			return;
-		}
-		if (document.documentElement.getAttribute("data-ui") !== UI_MOBILE) {
-			return; // Desktop shows the whole picture; there is nothing to chase
 		}
 		if (__follow_ctx === null) {
 			let canvas = document.createElement("canvas");

@@ -32,10 +32,16 @@
 //
 //   idle at a shell   the only thing changing is the blinking cursor
 //   typing            the line being typed
-//   output scrolling  the bottom of the text
 //   a BIOS/TUI menu   the highlighted row
 //
-// One mechanism, four cases, and no rule anywhere about where prompts live.
+// One mechanism, three cases, and no rule anywhere about where prompts live.
+//
+// ⚠ NOT output scrolling, which an earlier version of this comment claimed.
+// At 80x45 over a 1920x1080 console one sample cell is about one character
+// cell, so scrolling a half-full screen changes ~50% of them -- past the
+// repaint cap below, and deliberately so, because a cap that admits a scroll
+// admits a window opening too. The view stops following while output flows and
+// picks the cursor up again the moment it stops.
 //
 // State and arithmetic only. Sampling the video and applying the pan belong to
 // the caller, so every rule here is testable without a browser -- and these are
@@ -73,6 +79,14 @@ export const FOLLOW_MAX_FRACTION = 0.2;
 // The user has just said where they want to look; overriding that half a second
 // later is worse than not following at all.
 export const FOLLOW_MANUAL_HOLD_MS = 4000;
+
+// How much of a region's own bounding box has to have changed for it to be ONE
+// thing. A caret fills its box; a caret plus a clock in the far corner spans
+// most of the screen while changing a handful of cells, and the trailing-edge
+// rule below would then chase the CLOCK and drag the caret off the top. When
+// two things change at once there is no way to tell which one the user is
+// looking at, so the honest answer is to stay put until only one of them does.
+export const FOLLOW_MIN_DENSITY = 0.25;
 
 // The band the region is kept inside, as a fraction of the box on each edge.
 // Without it the view re-pans on every cursor blink, which reads as a jitter
@@ -122,13 +136,20 @@ export function changedRegion(prev, now, cols, rows, delta=FOLLOW_CELL_DELTA) {
 
 
 // Whether a change is worth moving the view for.
-export function shouldFollow(region, scale) {
+export function shouldFollow(region, scale, cols=FOLLOW_COLS, rows=FOLLOW_ROWS) {
+	if (region === null) {
+		return false;
+	}
+	// The share of the region's OWN box that actually changed. fraction is a
+	// share of the whole frame, so it cannot see a sparse box.
+	let box = (region.w * cols) * (region.h * rows);
+	let density = (box > 0 ? (region.fraction * cols * rows) / box : 0);
 	return (
-		region !== null
 		// At 1x the whole picture is already on screen; there is nowhere to pan
 		// TO, and moving would only fight the clamp.
-		&& scale > ZOOM_MIN
+		scale > ZOOM_MIN
 		&& region.fraction <= FOLLOW_MAX_FRACTION
+		&& density >= FOLLOW_MIN_DENSITY
 	);
 }
 
@@ -136,20 +157,30 @@ export function shouldFollow(region, scale) {
 // The pan that brings `region` back inside the comfort band -- {dx, dy} in box
 // pixels, and {0, 0} when it is already comfortable, which is most of the time.
 //
-// `view` is the zoom's own {scale, x, y}; `viewport` the box {width, height};
-// `region` is normalised to the frame, as changedRegion returns it.
-export function followPan({view, viewport, region, margin=FOLLOW_MARGIN}) {
-	// The picture is `scale` boxes wide, and view.x is where its left edge sits.
-	let span_x = viewport.width * view.scale;
-	let span_y = viewport.height * view.scale;
+// `view` is the zoom's own {scale, x, y}; `viewport` the visible box
+// {width, height}; `picture` is where the picture actually SITS in that box
+// unzoomed, as stream.getGeometry() reports it; `region` is normalised to the
+// picture, as changedRegion returns it.
+//
+// 🔴 The region is a fraction of the PICTURE, not of the box, and the two are
+// not the same: drawImage samples the source bitmap, which `object-fit:
+// contain` letterboxes inside the element. Measuring from the box instead put
+// the cursor up to 780px from where it really was in a full-tab window on a
+// phone -- most of the screen -- and panned the view into the black bars. Every
+// other box-to-picture mapping in this tree already goes through getGeometry();
+// this was the only one that did not.
+export function followPan({view, viewport, picture, region, margin=FOLLOW_MARGIN}) {
+	// An unzoomed box coordinate `b` is drawn at `view.x + b * scale`.
+	let left = picture.x + region.x * picture.width;
+	let top = picture.y + region.y * picture.height;
 	return {
 		"dx": __axis(
-			view.x + region.x * span_x,
-			view.x + (region.x + region.w) * span_x,
+			view.x + left * view.scale,
+			view.x + (left + region.w * picture.width) * view.scale,
 			viewport.width, margin),
 		"dy": __axis(
-			view.y + region.y * span_y,
-			view.y + (region.y + region.h) * span_y,
+			view.y + top * view.scale,
+			view.y + (top + region.h * picture.height) * view.scale,
 			viewport.height, margin),
 	};
 }
