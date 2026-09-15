@@ -40,7 +40,7 @@ export function Hid(__getGeometry, __recorder) {
 	var __mouse = null;
 
 	var __init__ = function() {
-		__keyboard = new Keyboard(__recorder.recordWsEvent);
+		__keyboard = new Keyboard(__recorder.recordWsEvent, __recorder.recordPrintEvent);
 		__mouse = new Mouse(__getGeometry, __recorder.recordWsEvent);
 
 		document.addEventListener("visibilitychange", function() {

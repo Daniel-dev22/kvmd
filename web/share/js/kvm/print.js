@@ -30,12 +30,21 @@
 import {tools} from "../tools.js";
 
 
-// delay is in SECONDS, matching the API.
-export function printText(text, keymap, delay, on_done) {
+// delay is in SECONDS, matching the API. `timeout` is in MILLISECONDS,
+// matching tools.httpPost -- and it is the caller's to choose, because the two
+// callers are not alike. A paste types a whole document one key at a time and
+// may legitimately run for a long while; an interactive keystroke that has not
+// landed in seconds is not going to, and holding the queue open for it stalls
+// every key behind it.
+//
+// 📏 The old constant here was `7 * 24 * 3600` -- seconds written into a
+// milliseconds parameter, so what was meant as "a week" was 604800 ms, ten
+// minutes. Kept as the paste default so that caller is unchanged.
+export function printText(text, keymap, delay, on_done, timeout=(7 * 24 * 3600)) {
 	tools.httpPost(
 		"api/hid/print",
 		{"limit": 0, "keymap": keymap, "delay": delay},
-		on_done, text, "text/plain", 7 * 24 * 3600,
+		on_done, text, "text/plain", timeout,
 	);
 }
 

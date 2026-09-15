@@ -309,6 +309,15 @@ div.keypad-type {
 	border: var(--border-intensive-thin);
 }
 
+/* Typing that did not reach the host. There is no feedback channel and the
+   video is the only other evidence, so the failure is shown where the user is
+   already looking -- anything still queued behind it has been dropped, because
+   releasing it minutes later types it into a screen that has moved on. */
+:root[data-ui="mobile"] div.keypad-type input[data-failed],
+:root[data-ui="mobile"] div.keypad-type input[data-failed]:focus {
+	border: var(--border-failed-thin);
+}
+
 :root[data-ui="mobile"] div.keypad-type button {
 	flex: 0 0 auto;
 	min-width: 46px;

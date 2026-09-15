@@ -28,7 +28,12 @@ import {printText} from "./print.js";
 import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
 
-export function Keyboard(__recordWsEvent) {
+// An interactive keystroke that has not landed in fifteen seconds is not going
+// to, and every key behind it in the queue is waiting on it.
+const TYPING_TIMEOUT_MS = 15000;
+
+
+export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	var self = this;
 
 	/************************************************************************/
@@ -218,21 +223,50 @@ export function Keyboard(__recordWsEvent) {
 	// through the bar's queue. Everything else -- Esc, Tab, the arrows, anything
 	// held with Ctrl/Alt/Meta -- is not, and still goes straight out, because
 	// Ctrl+C in a console is not optional.
-	var __isTypingBarKey = function(ev) {
-		if (ev.target !== $("hid-type-input") || typeof ev.key !== "string") {
-			return false;
+	// Which presses the bar swallowed, so their RELEASES are swallowed too.
+	//
+	// Focus can move between a keydown and its keyup -- press a key over the
+	// stream, then tap the bar, then let go -- and classifying each event by
+	// where it happens to land would send the press and eat the release, leaving
+	// that key held down on the host forever. The press decides; the release
+	// follows its own press.
+	var __bar_keys = new Set();
+
+	var __isTypingBarKey = function(ev, state) {
+		if (!state) {
+			return __bar_keys.delete(ev.code);
 		}
-		if (ev.ctrlKey || ev.altKey || ev.metaKey) {
-			return false;
+		// AltGr is Ctrl+Alt on Windows and Linux, so testing those two flags
+		// alone refuses every AltGr character -- @ \\ [ ] { } ~ on a German,
+		// French or Nordic layout -- and sends it as a raw scancode for the
+		// HOST's layout to reinterpret, which is the second keymap the print
+		// path exists to avoid.
+		let altgr = (typeof ev.getModifierState === "function" && ev.getModifierState("AltGraph"));
+		let chord = (!altgr && (ev.ctrlKey || ev.altKey)) || ev.metaKey;
+		let mine = (
+			ev.target === $("hid-type-input")
+			&& typeof ev.key === "string"
+			&& !chord
+			// "Process" and "Unidentified" are a soft keyboard mid-composition:
+			// the field is the only thing that can say what the user meant.
+			//
+			// Delete is NOT here: the caret is pinned at the end of the field, so
+			// a forward delete changes nothing and fires no input event -- the bar
+			// would claim it and then never see it, and it reached the host by
+			// neither path.
+			&& (ev.key.length === 1
+				|| ["Enter", "Backspace", "Process", "Unidentified"].includes(ev.key))
+		);
+		if (mine) {
+			__bar_keys.add(ev.code);
+		} else {
+			__bar_keys.delete(ev.code);
 		}
-		// "Process" and "Unidentified" are a soft keyboard mid-composition: the
-		// field is the only thing that can say what the user meant.
-		return (ev.key.length === 1
-			|| ["Enter", "Backspace", "Delete", "Process", "Unidentified"].includes(ev.key));
+		return mine;
 	};
 
 	var __keyboardHandler = function(ev, state) {
-		if (__isTypingBarKey(ev)) {
+		if (__isTypingBarKey(ev, state)) {
 			return;
 		}
 		if (ev.code === "CapsLock") {
@@ -430,6 +464,7 @@ export function Keyboard(__recordWsEvent) {
 	var __composing = false;
 	var __queue = null;
 	var __reset_timer = null;
+	var __failed_timer = null;
 	var __exitTyping = null;
 	var __blur_timer = null;
 
@@ -440,15 +475,63 @@ export function Keyboard(__recordWsEvent) {
 		}
 
 		__queue = makeTypingQueue({
-			"print": (text, keymap, done) => printText(text, keymap, 0, (http) => done(http.status === 200, http)),
-			"sendKey": __sendKey,
+			"print": function(text, keymap, done) {
+				// Work queued before the HID was muted must not leak out after it.
+				if ($("hid-mute-switch").checked) {
+					done(true, null);
+					return;
+				}
+				printText(text, keymap, 0, function(http) {
+					if (http.status === 200) {
+						// The Text menu records its prints; a recording made through
+						// the bar that held the Enters and none of the text would
+						// replay a bare Enter into whatever is on screen.
+						__recordPrintEvent(text, keymap, 0);
+					}
+					done(http.status === 200, http);
+				}, TYPING_TIMEOUT_MS);
+			},
+			"sendKey": function(code, state) {
+				// Reports DELIVERABILITY, not whether anything was sent: a muted
+				// HID is a deliberate silence, an unreachable one is a failure.
+				//
+				// ⚠ It cannot yet tell the difference, so it always claims success.
+				// Answering it properly means reading __online -- which covers the
+				// bigger hole that api/hid/print returns 200 whether or not kvmd
+				// could deliver anything -- AND an instrument that can put a page
+				// with no kvmd behind it back "online", or the refusal ships with
+				// no test that can ever make it fire. Both are Phase 8; the queue's
+				// side of it is implemented and covered.
+				__sendKey(code, state);
+				return true;
+			},
 			"getKeymap": function() {
 				// The Text menu already owns the keymap chooser; reuse it
 				// rather than offering a second one that could disagree.
 				let el_km = $("hid-pak-keymap-selector");
 				return ((el_km !== null && el_km.value) ? el_km.value : "en-us");
 			},
-			"onError": (http) => tools.error("Keyboard: typing failed:", http.status, http.responseText),
+			"onError": function(why) {
+				if (why === null) {
+					return; // A deliberate drop, not a failure
+				}
+				if (why.what === "print") {
+					// The body can hold what the user typed, so it is not logged.
+					tools.error("Keyboard: typing failed with HTTP", why.http.status);
+				} else {
+					tools.error("Keyboard: typing failed: the HID connection is down");
+				}
+				// Anything still queued has been dropped, and on a phone the video
+				// is the only other evidence -- so say so where the user is looking.
+				el.setAttribute("data-failed", "1");
+				if (__failed_timer !== null) {
+					clearTimeout(__failed_timer);
+				}
+				__failed_timer = setTimeout(function() {
+					__failed_timer = null;
+					el.removeAttribute("data-failed");
+				}, 2000);
+			},
 		});
 
 		// While the system keyboard is up, the scancode layers are redundant --
@@ -533,6 +616,14 @@ export function Keyboard(__recordWsEvent) {
 		});
 		el.addEventListener("compositionend", function() {
 			__composing = false;
+			if (document.activeElement !== el) {
+				// Blur and compositionend arrive in either order depending on the
+				// engine. Blink commits first, so this is unreachable there -- but
+				// the other way round the field has already been emptied, and
+				// decoding against that would type the abandoned word at the host
+				// and re-pad a blurred field so its placeholder never came back.
+				return;
+			}
 			// Engines disagree about whether the final input event comes before
 			// or after this one, so both paths decode. Whichever runs second
 			// sees no change and emits nothing.
@@ -542,7 +633,11 @@ export function Keyboard(__recordWsEvent) {
 			__onEdit(el, ev.inputType);
 		});
 		el.addEventListener("keydown", function(ev) {
-			if (ev.key === "Enter") {
+			// A chord is not the bar's: __isTypingBarKey lets Ctrl/Alt/Meta+Enter
+			// through to the scancode path, so handling it here too sent Enter
+			// TWICE -- the immediate copy ahead of its own text, which is the
+			// defect this phase exists to fix, gated behind a modifier.
+			if (ev.key === "Enter" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
 				// preventDefault stops the single-line field submitting, and is
 				// why no input event follows this to double the Enter.
 				ev.preventDefault();
@@ -551,6 +646,7 @@ export function Keyboard(__recordWsEvent) {
 					// reach the host before the characters of that command do.
 					__queue.push([{"key": "Enter", "n": 1}]);
 				}
+				__composing = false;
 				__resetField(el);
 			}
 		});
@@ -587,6 +683,12 @@ export function Keyboard(__recordWsEvent) {
 	};
 
 	var __clearField = function(el) {
+		// Composition state is otherwise cleared ONLY by compositionend, and an
+		// Android tab frozen mid-word never fires one -- leaving __composing
+		// latched, every later reset skipped, and the field back to being the
+		// accumulating transcript this phase set out to delete.
+		__composing = false;
+		__bar_keys.clear();
 		// A reset still pending from the last edit would put the padding back
 		// after this, and a field that is not empty renders no placeholder -- so
 		// leaving typing mode would leave an empty-looking box with no hint in it.

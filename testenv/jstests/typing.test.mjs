@@ -141,6 +141,44 @@ test("an engine that reports no inputType still works off the diff", () => {
 		[{"key": "Backspace", "n": 1}]);
 });
 
+test("a deletion is seen without an inputType, because the padding was eaten", () => {
+	// inputType was the ONLY thing that could answer a delete at the start of a
+	// word, so an engine that does not report one -- or reports "" -- lost the
+	// first Backspace after every reset, silently. That is the originally
+	// reported bug with no diagnostic. The padding is observable everywhere.
+	assert.deepEqual(
+		decodeEdit({"was": PAD, "now": PAD.slice(0, -1), "input_type": null}),
+		[{"key": "Backspace", "n": 1}]);
+	assert.deepEqual(
+		decodeEdit({"was": PAD, "now": PAD.slice(0, -1), "input_type": ""}),
+		[{"key": "Backspace", "n": 1}]);
+});
+
+test("padding eaten alongside real text is not counted twice", () => {
+	// A word-delete that swallows the word AND the padding behind it must
+	// erase the word -- not the word plus eight invisible characters that were
+	// never on the host.
+	assert.deepEqual(
+		decodeEdit({"was": PAD + "hello", "now": PAD.slice(0, -3), "input_type": "deleteWordBackward"}),
+		[{"key": "Backspace", "n": 5}]);
+});
+
+test("one keypress per code point, never per UTF-16 code unit", () => {
+	// A backspace count is a number of KEYPRESSES and the host types one key
+	// per code point. Counting units made a single emoji -- one surrogate pair
+	// -- erase TWO characters from the host, one of which the user never
+	// typed, and there is no feedback channel to notice it by.
+	assert.deepEqual(
+		decodeEdit({"was": PAD + "\u{1f44d}", "now": PAD, "input_type": "deleteContentBackward"}),
+		[{"key": "Backspace", "n": 1}]);
+	assert.deepEqual(diffTyped("\u{1f44d}\u{1f44d}", "\u{1f44d}"), {"backspaces": 1, "added": ""});
+	// A combining mark IS a second keypress on the host, so it stays two.
+	assert.deepEqual(
+		decodeEdit({"was": PAD + "e\u0301", "now": PAD, "input_type": "deleteContentBackward"}),
+		[{"key": "Backspace", "n": 2}]);
+	assert.deepEqual(diffTyped("", "\u{1f600}"), {"backspaces": 0, "added": "\u{1f600}"});
+});
+
 // ---- the queue ----
 
 // One ordered record of everything that reached the host, whichever transport
@@ -260,25 +298,68 @@ test("an empty push does nothing", () => {
 	assert.ok(q.isIdle());
 });
 
-test("a failed request is reported and does not wedge the queue", () => {
+test("a failed request drops what was queued behind it, and says so", () => {
+	// Ordering one transport behind the other makes this queue a single point
+	// of stall. Letting a backlog out after the failure types it into whatever
+	// is on the screen by then -- and there is no feedback channel to
+	// resynchronise against, so work whose context has gone is dropped.
 	const h = fakeHost();
 	const errors = [];
-	const q = queueOn(h, {"onError": (i) => errors.push(i)});
+	const q = queueOn(h, {"onError": (e) => errors.push(e)});
 	q.push([{"text": "a"}]);
 	q.push([{"text": "b"}]);
 	h.settle(false, {"status": 413});
-	assert.deepEqual(errors, [{"status": 413}]);
-	assert.deepEqual(h.log, ["print:a", "print:b"], "the queue stopped after an error");
-	h.settle();
+	assert.deepEqual(errors, [{"what": "print", "http": {"status": 413}}]);
+	assert.deepEqual(h.log, ["print:a"], "the queued text went to the host after the failure");
+	assert.ok(q.isIdle(), "the queue must not stay busy after a failure");
+});
+
+test("a failed request drops the Enter queued behind it too", () => {
+	// The worst case this prevents: the command text fails, and the Enter that
+	// was meant to run THAT command arrives at a shell holding something else.
+	const h = fakeHost();
+	const q = queueOn(h);
+	q.push([{"text": "rm -rf /tmp/x"}, {"key": "Enter", "n": 1}]);
+	h.settle(false, {"status": 500});
+	assert.deepEqual(h.log, ["print:rm -rf /tmp/x"], "an orphaned Enter reached the host");
+});
+
+test("typing resumes after a failure", () => {
+	const h = fakeHost();
+	const q = queueOn(h);
+	q.push([{"text": "a"}]);
+	h.settle(false, {"status": 500});
+	q.push([{"text": "b"}]);
+	assert.deepEqual(h.log, ["print:a", "print:b"], "a failure must not wedge the queue for good");
+});
+
+test("a key whose transport is down aborts the queue instead of letting text go on alone", () => {
+	// The websocket can be gone while HTTP still works. Printing the text and
+	// silently dropping the Backspace that belongs with it turns "helo" plus a
+	// correction into "helolo" on the host.
+	const h = fakeHost();
+	const errors = [];
+	const q = makeTypingQueue({
+		"print": h.print, "sendKey": () => false, "getKeymap": () => "en-us",
+		"onError": (e) => errors.push(e),
+	});
+	q.push([{"key": "Backspace", "n": 1}, {"text": "lo"}]);
+	assert.deepEqual(h.log, [], "text went out although its key could not");
+	assert.deepEqual(errors, [{"what": "keys"}]);
 	assert.ok(q.isIdle());
 });
 
-test("a failed request does not strand a key behind it", () => {
+test("drop() clears the queue without reporting a failure", () => {
 	const h = fakeHost();
-	const q = queueOn(h);
-	q.push([{"text": "a"}, {"key": "Enter", "n": 1}]);
-	h.settle(false, {"status": 500});
-	assert.deepEqual(h.log, ["print:a", "key:Enter:down", "key:Enter:up"]);
+	const errors = [];
+	const q = queueOn(h, {"onError": (e) => errors.push(e)});
+	q.push([{"text": "a"}]);
+	q.push([{"text": "b"}, {"key": "Enter", "n": 1}]);
+	q.drop();
+	assert.deepEqual(errors, [null], "a deliberate drop is not an error to show the user");
+	h.settle();
+	assert.deepEqual(h.log, ["print:a"]);
+	assert.ok(q.isIdle());
 });
 
 test("the keymap is resolved per request, not captured once", () => {
@@ -316,6 +397,37 @@ test("composition gates the field reset, never the sending", () => {
 		"the input handler must not consult composition state: every composed character goes to the host");
 	assert.match(kb, /if \(__composing\) \{\n\t{4}\t*return; \/\/ The IME still owns the field/,
 		"the reset is what composition gates");
+});
+
+test("a chord is not the bar's to handle", () => {
+	// __isTypingBarKey lets Ctrl/Alt/Meta+Enter through to the scancode path,
+	// so handling it in the field too sent Enter TWICE -- the immediate copy
+	// ahead of its own text, which is the defect this phase exists to fix.
+	const kb = read("web/share/js/kvm/keyboard.js");
+	const keydown = kb.slice(kb.indexOf(`el.addEventListener("keydown"`), kb.indexOf("tools.el.setOnClick"));
+	assert.match(keydown, /ev\.key === "Enter" && !ev\.ctrlKey && !ev\.altKey && !ev\.metaKey/,
+		"the field's Enter handler must stand down for a chord");
+});
+
+test("a press and its release are classified together", () => {
+	// Focus can move between keydown and keyup -- press over the stream, tap
+	// the bar, let go -- and classifying each by where it lands sends the press
+	// and eats the release, leaving that key held down on the host forever.
+	const kb = read("web/share/js/kvm/keyboard.js");
+	assert.match(kb, /__bar_keys/, "the press's decision has to be remembered for the release");
+	const fn = kb.slice(kb.indexOf("var __isTypingBarKey"), kb.indexOf("var __keyboardHandler"));
+	assert.match(fn, /if \(!state\) \{\s*\n\s*return __bar_keys\.delete\(ev\.code\);/,
+		"a release must follow its own press, not the current focus");
+});
+
+test("composition state has a reset path that is not compositionend", () => {
+	// An Android tab frozen mid-word never fires compositionend, which left
+	// __composing latched and every later reset skipped -- the field back to
+	// being the accumulating transcript this phase set out to delete.
+	const kb = read("web/share/js/kvm/keyboard.js");
+	const clear = kb.slice(kb.indexOf("var __clearField"), kb.indexOf("var __onEdit"));
+	assert.match(clear, /__composing = false/, "blur must clear composition state");
+	assert.match(clear, /__bar_keys\.clear\(\)/, "blur must not leave a swallowed press unmatched");
 });
 
 test("the typing field cannot trigger iOS focus zoom", () => {

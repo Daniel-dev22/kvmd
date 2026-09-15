@@ -36,8 +36,26 @@ const TYPES = {
 // Serves web/ so that ES modules load. Modules are blocked over file://, and
 // the pages under test are module-driven.
 export async function serveWeb() {
+	// Everything the page sends to api/hid/print, in order, so a test can read
+	// what the host would have received.
+	const printed = [];
 	const server = createServer(async (req, res) => {
 		const rel = decodeURIComponent(req.url.split("?")[0]);
+		// The ONE endpoint that has to answer. Everything else in kvmd's API is
+		// allowed to 404 here -- the pages lay out without it -- but a print
+		// that 404s exercises the queue's FAILURE path, which now discards
+		// what is queued behind it. The suite was measuring that failure path
+		// while asserting about the success one, and losing characters to it.
+		if (rel.endsWith("/api/hid/print") || rel === "/api/hid/print") {
+			const chunks = [];
+			for await (const chunk of req) {
+				chunks.push(chunk);
+			}
+			printed.push(Buffer.concat(chunks).toString("utf-8"));
+			res.writeHead(200, {"Content-Type": "application/json"});
+			res.end(JSON.stringify({"ok": true, "result": {}}));
+			return;
+		}
 		const file = path.join(ROOT, "web", path.normalize(rel).replace(/^(\.\.[/\\])+/, ""));
 		try {
 			const body = await readFile(file);
@@ -51,6 +69,7 @@ export async function serveWeb() {
 	await new Promise((done) => server.listen(0, "127.0.0.1", done));
 	return {
 		"origin": `http://127.0.0.1:${server.address().port}`,
+		"printed": printed,
 		"close": () => new Promise((done) => server.close(done)),
 	};
 }
