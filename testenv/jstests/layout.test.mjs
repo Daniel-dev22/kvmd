@@ -35,9 +35,17 @@ test("a browser is available to measure layout", () => {
 
 const urlFor = (page) => `${server.origin}/${page.replace(/^web\//, "")}`;
 
-async function open(page, width, height = 844, mobile = true) {
+async function open(page, width, height = 844, mobile = true, touch = false) {
 	const pg = await browser.newPage();
 	await pg.setViewport(width, height, mobile);
+	// Touch has to be on BEFORE navigating, and it changes what the layout
+	// resolves to: `pointer: coarse` grows the window header from 21px to 36px.
+	// 📏 Without it a sheet measures ~15px shorter than the same sheet on a
+	// phone -- enough that a 42px regression slipped under a height assertion
+	// by 4px and the test passed.
+	if (touch) {
+		await pg.setTouch(true, 5);
+	}
 	await pg.clearStorage(server.origin);
 	await pg.goto(urlFor(page));
 	return pg;
@@ -207,9 +215,25 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		// is the only time this matters. Three rows of keys (layer picker,
 		// modifiers, arrows) made the sheet 269px, 64% of the screen, and left
 		// 62px of the console visible. One row leaves ~162px.
-		const pg = await open("web/kvm/index.html", 390, 420);
+		// With a real touchscreen: this is a claim about a phone, and the
+		// header's height -- and so the sheet's -- depends on `pointer: coarse`.
+		const pg = await open("web/kvm/index.html", 390, 420, true, true);
 		await pg.eval(SHOW);
-		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		// Wait for the sheet to STOP changing, never a guessed number of
+		// milliseconds. A sheet measured mid-open is indistinguishable from one
+		// that opened at the right size -- 📏 which is exactly how the height
+		// assertions below passed against a build with the layer picker's whole
+		// row restored, a 42px regression they exist to catch.
+		await pg.eval(`(async () => {
+			let last = -1;
+			for (let i = 0; i < 40; i += 1) {
+				await new Promise((r) => setTimeout(r, 50));
+				const h = Math.round(document.getElementById("keyboard-window").getBoundingClientRect().height);
+				if (h === last && h > 0) { return h; }
+				last = h;
+			}
+			return last;
+		})()`);
 		const m = await pg.eval(`(() => {
 			const strips = document.querySelector(".keypad-strips");
 			const keys = [...strips.querySelectorAll(".key")];
@@ -249,8 +273,8 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 				`${code} needs scrolling to reach; visible: ${JSON.stringify(m.reachableWithoutScrolling)}`);
 		}
 		assert.equal(m.all.length, 10, "all ten strip keys must still be there, just scrolled");
-		assert.ok(m.sheet <= 200, `the sheet is ${m.sheet}px; three rows of keys was 269px`);
-		assert.ok(m.console >= 140, `only ${m.console}px of console visible; three rows left 62px`);
+		assert.ok(m.sheet <= 185, `the sheet is ${m.sheet}px; three rows of keys was 269px`);
+		assert.ok(m.console >= 150, `only ${m.console}px of console visible; three rows left 62px`);
 	});
 
 	test("every visible key and layer button is touchable", async () => {
