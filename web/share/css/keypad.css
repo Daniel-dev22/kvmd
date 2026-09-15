@@ -276,6 +276,51 @@ div.keypad-layers {
 	border-top: var(--border-menu-item-content-top-thin);
 }
 
+/* Outside typing mode the wrapper is not a box at all, so the two strip rows
+   lay out exactly as they did before it existed. */
+div.keypad-strips {
+	display: contents;
+}
+
+/* While the system keyboard is up, the two strip rows become ONE horizontally
+   scrollable row. 📏 Three rows of keys above the system keyboard left 62px of
+   the console visible at 390x420 -- the sheet was 64% of the screen.
+   The keys keep their 46px touch target and simply run off the right. */
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips {
+	display: flex;
+	gap: 3px;
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+	scrollbar-width: none;
+	padding-top: 6px;
+	border-top: var(--border-menu-item-content-top-thin);
+	/* So it reads as scrollable rather than as a row that has been cut off. */
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+	mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips::-webkit-scrollbar {
+	display: none;
+}
+
+/* The rows stop being boxes so their keys become items of the one scroller. */
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strip {
+	display: contents;
+}
+
+/* Out of the 20-column grid and onto a fixed width: the grid spans are for a
+   row that fits, and these deliberately do not. */
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips div.key {
+	flex: 0 0 auto;
+	width: 46px;
+}
+
+/* The picker is a whole row whose only job while typing is "give me the board
+   back", and that is one button -- which sits in the bar instead. */
+:root[data-ui="mobile"][data-typing="1"] div.keypad-layers {
+	display: none;
+}
+
 /* The native typing bar. Sits last so it is directly above the system keyboard
    when that opens. */
 div.keypad-type {
@@ -316,6 +361,16 @@ div.keypad-type {
 :root[data-ui="mobile"] div.keypad-type input[data-failed],
 :root[data-ui="mobile"] div.keypad-type input[data-failed]:focus {
 	border: var(--border-failed-thin);
+}
+
+/* Only while typing: with the board showing, the layer picker is the way back
+   and this would be a second one. */
+div.keypad-type button#hid-type-board {
+	display: none;
+}
+
+:root[data-ui="mobile"][data-typing="1"] div.keypad-type button#hid-type-board {
+	display: block;
 }
 
 :root[data-ui="mobile"] div.keypad-type button {

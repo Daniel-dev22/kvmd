@@ -435,18 +435,30 @@ mixin ck_row(layer)
 
 		//- Always on screen, whichever layer is showing and whether or not the
 		//- native keyboard is up. A phone IME cannot send any of these.
-		div(class="keypad-row keypad-strip" data-keypad-persistent)
-			+ck("Escape", 3)
-			+ck("Tab", 3)
-			+ck("ControlLeft", 3)
-			+ck("AltLeft", 3)
-			+ck("MetaLeft", 4)
-			+ck("ShiftLeft", 4)
-		div(class="keypad-row keypad-strip" data-keypad-persistent)
-			+ck("ArrowLeft", 5)
-			+ck("ArrowDown", 5)
-			+ck("ArrowUp", 5)
-			+ck("ArrowRight", 5)
+		//-
+		//- While the system keyboard is up these two rows become ONE
+		//- horizontally scrollable row. 📏 Three rows of keys above the system
+		//- keyboard left 62px of the console visible on a 390x420 viewport --
+		//- the sheet was 64% of the screen. As one row it is ~178px.
+		//-
+		//- The arrows come FIRST so that what fits without scrolling is the
+		//- console's own set: the four arrows, Ctrl, Esc and Tab. Alt, Shift
+		//- and Win scroll. DOM order is visual order in both arrangements --
+		//- no `order` values, which is what put the navbar's tab order out of
+		//- step with its layout in Phase 5.
+		.keypad-strips
+			div(class="keypad-row keypad-strip" data-keypad-persistent)
+				+ck("ArrowLeft", 5)
+				+ck("ArrowDown", 5)
+				+ck("ArrowUp", 5)
+				+ck("ArrowRight", 5)
+			div(class="keypad-row keypad-strip" data-keypad-persistent)
+				+ck("ControlLeft", 3)
+				+ck("Escape", 3)
+				+ck("Tab", 3)
+				+ck("AltLeft", 3)
+				+ck("ShiftLeft", 4)
+				+ck("MetaLeft", 4)
 
 		//- Sits at the bottom so it is directly above the system keyboard when
 		//- that opens. 16px or larger, or iOS zooms the page on focus.
@@ -462,4 +474,8 @@ mixin ck_row(layer)
 				placeholder="Tap to type on the host"
 				aria-label="Type on the host"
 			)
+			//- The way back to the full board. It lives here rather than in the
+			//- layer picker because the picker is a whole row of its own, and
+			//- in typing mode its only job is this one button.
+			button#hid-type-board(type="button" title="Show the keyboard") &#9000;
 			button#hid-type-clear(type="button" title="Clear") &times;

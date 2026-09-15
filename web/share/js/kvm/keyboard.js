@@ -651,6 +651,15 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 			}
 		});
 
+		// The way back to the full board while the system keyboard is up. The
+		// layer picker does this too, but it is a whole row of its own and in
+		// typing mode only one of its five buttons means anything.
+		tools.el.setOnClick($("hid-type-board"), function() {
+			if (__exitTyping !== null) {
+				__exitTyping();
+			}
+		});
+
 		tools.el.setOnClick($("hid-type-clear"), function() {
 			// Local only -- clears the field, never touches the host.
 			__resetField(el);

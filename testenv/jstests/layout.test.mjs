@@ -172,6 +172,10 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		return [...document.querySelectorAll(${JSON.stringify(selector)})]
 			.filter((el) => el.getBoundingClientRect().height > 0)
 			.map((el) => {
+				// Reachable, not merely on screen right now: the strip scrolls
+				// horizontally while typing, and a key past its right edge is
+				// reached by scrolling to it, which is what a finger does.
+				el.scrollIntoView({"block": "nearest", "inline": "nearest"});
 				const b = el.getBoundingClientRect();
 				const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
 				return {
@@ -196,6 +200,57 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		const blocked = await pg.eval(hitTest("#mouse-buttons .key"));
 		await pg.close();
 		assert.deepEqual(blocked, [], `mouse buttons covered: ${JSON.stringify(blocked)}`);
+	});
+
+	test("while typing, the strip is ONE scrollable row and the console gets the height", async () => {
+		// 📏 Measured at 390x420 -- a phone with the system keyboard up, which
+		// is the only time this matters. Three rows of keys (layer picker,
+		// modifiers, arrows) made the sheet 269px, 64% of the screen, and left
+		// 62px of the console visible. One row leaves ~162px.
+		const pg = await open("web/kvm/index.html", 390, 420);
+		await pg.eval(SHOW);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		const m = await pg.eval(`(() => {
+			const strips = document.querySelector(".keypad-strips");
+			const keys = [...strips.querySelectorAll(".key")];
+			const r = strips.getBoundingClientRect();
+			const win = document.getElementById("keyboard-window").getBoundingClientRect();
+			const box = document.getElementById("stream-box").getBoundingClientRect();
+			return {
+				"typing": document.documentElement.dataset.typing,
+				"tops": [...new Set(keys.map((k) => Math.round(k.getBoundingClientRect().top)))],
+				"scrollW": Math.round(strips.scrollWidth),
+				"clientW": Math.round(strips.clientWidth),
+				"minKeyH": Math.min(...keys.map((k) => Math.round(k.getBoundingClientRect().height))),
+				"minKeyW": Math.min(...keys.map((k) => Math.round(k.getBoundingClientRect().width))),
+				"reachableWithoutScrolling": keys
+					.filter((k) => { const b = k.getBoundingClientRect();
+						return b.left >= r.left - 1 && b.right <= r.right + 1; })
+					.map((k) => k.dataset.keypadCode),
+				"all": keys.map((k) => k.dataset.keypadCode),
+				"sheet": Math.round(win.height),
+				"console": Math.round(win.top - box.top),
+			};
+		})()`);
+		await pg.close();
+
+		assert.equal(m.typing, "1", "precondition: the compact keyboard opens in typing mode");
+		assert.equal(m.tops.length, 1, `the strip must be ONE row, found tops ${JSON.stringify(m.tops)}`);
+		assert.ok(m.scrollW > m.clientW,
+			`the strip must scroll, not be cut off: ${m.scrollW} content in ${m.clientW}`);
+		// Every key still a finger-sized target -- the height came from losing
+		// two ROWS, never from shrinking the keys.
+		assert.ok(m.minKeyH >= 44, `keys shrank to ${m.minKeyH}px tall`);
+		assert.ok(m.minKeyW >= 44, `keys shrank to ${m.minKeyW}px wide`);
+		// What fits without scrolling is the console's own set. Alt, Shift and
+		// Win scroll: a shell needs the arrows and Ctrl far more often.
+		for (const code of ["ArrowLeft", "ArrowDown", "ArrowUp", "ArrowRight", "ControlLeft", "Escape"]) {
+			assert.ok(m.reachableWithoutScrolling.includes(code),
+				`${code} needs scrolling to reach; visible: ${JSON.stringify(m.reachableWithoutScrolling)}`);
+		}
+		assert.equal(m.all.length, 10, "all ten strip keys must still be there, just scrolled");
+		assert.ok(m.sheet <= 200, `the sheet is ${m.sheet}px; three rows of keys was 269px`);
+		assert.ok(m.console >= 140, `only ${m.console}px of console visible; three rows left 62px`);
 	});
 
 	test("every visible key and layer button is touchable", async () => {
@@ -473,10 +528,17 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.equal(opened.rows, 0, "the redundant scancode layers must not be on screen while the phone's own keyboard is");
 		assert.ok(opened.strip >= 10, `only ${opened.strip} strip keys -- the arrows and modifiers a phone cannot send must stay`);
 		assert.equal(opened.bar, 1, "the typing bar must be on screen");
-		assert.ok(opened.picker > 0, "the layer picker must stay, so the board is one tap away");
+		// The picker is a whole row whose only job here is "give me the board
+		// back", and that is one button -- which sits in the typing bar, where
+		// it costs no height at all. 📏 Three rows of keys above the system
+		// keyboard left 62px of the console visible at 390x420; one scrollable
+		// row leaves ~162px.
+		assert.equal(opened.picker, 0, "the layer picker is a row of its own and must not cost one while typing");
+		assert.ok(await pg.eval(`document.getElementById("hid-type-board").getBoundingClientRect().height > 0`),
+			"the way back to the board must be on screen");
 
-		// One tap on the picker, and the full board is back immediately.
-		await pg.eval(`document.querySelector('[data-keypad-layer-button="abc"]').click()`);
+		// One tap on that button, and the full board is back immediately.
+		await pg.eval(`document.getElementById("hid-type-board").click()`);
 		const tapped = await pg.eval(snap);
 		assert.equal(tapped.typing, null, "a layer tap must leave typing mode at once, not after the blur debounce");
 		assert.ok(tapped.rows > 0, "the scancode board did not come back on the tap that asked for it");

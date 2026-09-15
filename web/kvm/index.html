@@ -2485,52 +2485,55 @@
                   </div>
                   <div class="empty" style="--kc: 12"></div>
             </div>
-        <div class="keypad-row keypad-strip" data-keypad-persistent>
-              <div class="key" data-keypad-code="Escape" style="--kc: 3">
-                    <div class="label">Esc
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="Tab" style="--kc: 3">
-                    <div class="label">&#8676;<br>&#8677;
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="ControlLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 3">
-                    <div class="label"><b>&bull;</b><br>Ctrl
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="AltLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 3">
-                    <div class="label"><b>&bull;</b><br>Alt
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="MetaLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
-                    <div class="label"><b>&bull;</b><br>Win
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="ShiftLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
-                    <div class="label"><b>&bull;</b><br>Shift
-                    </div>
-              </div>
-        </div>
-        <div class="keypad-row keypad-strip" data-keypad-persistent>
-              <div class="key" data-keypad-code="ArrowLeft" style="--kc: 5">
-                    <div class="label">&larr;
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="ArrowDown" style="--kc: 5">
-                    <div class="label">&darr;
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="ArrowUp" style="--kc: 5">
-                    <div class="label">&uarr;
-                    </div>
-              </div>
-              <div class="key" data-keypad-code="ArrowRight" style="--kc: 5">
-                    <div class="label">&rarr;
-                    </div>
-              </div>
+        <div class="keypad-strips">
+          <div class="keypad-row keypad-strip" data-keypad-persistent>
+                <div class="key" data-keypad-code="ArrowLeft" style="--kc: 5">
+                      <div class="label">&larr;
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="ArrowDown" style="--kc: 5">
+                      <div class="label">&darr;
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="ArrowUp" style="--kc: 5">
+                      <div class="label">&uarr;
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="ArrowRight" style="--kc: 5">
+                      <div class="label">&rarr;
+                      </div>
+                </div>
+          </div>
+          <div class="keypad-row keypad-strip" data-keypad-persistent>
+                <div class="key" data-keypad-code="ControlLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 3">
+                      <div class="label"><b>&bull;</b><br>Ctrl
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="Escape" style="--kc: 3">
+                      <div class="label">Esc
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="Tab" style="--kc: 3">
+                      <div class="label">&#8676;<br>&#8677;
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="AltLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 3">
+                      <div class="label"><b>&bull;</b><br>Alt
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="ShiftLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
+                      <div class="label"><b>&bull;</b><br>Shift
+                      </div>
+                </div>
+                <div class="key" data-keypad-code="MetaLeft" data-keypad-allow-autohold data-keypad-modifier style="--kc: 4">
+                      <div class="label"><b>&bull;</b><br>Win
+                      </div>
+                </div>
+          </div>
         </div>
         <div class="keypad-type">
           <input id="hid-type-input" type="text" inputmode="text" enterkeyhint="enter" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tap to type on the host" aria-label="Type on the host">
+          <button id="hid-type-board" type="button" title="Show the keyboard">&#9000;</button>
           <button id="hid-type-clear" type="button" title="Clear">&times;</button>
         </div>
       </div>
