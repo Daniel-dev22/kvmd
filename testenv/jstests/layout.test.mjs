@@ -621,7 +621,7 @@ describe("the terminal is zoomed for a phone, and only for a phone", {"skip": ch
 			"tall": Math.round(box.height),
 			"window": Math.round(outer.width),
 			"inner": (frame.contentWindow === null ? null : frame.contentWindow.innerWidth),
-			"zoom": getComputedStyle(frame).zoom,
+			"transform": getComputedStyle(frame).transform,
 		};
 	})()`;
 
@@ -629,19 +629,19 @@ describe("the terminal is zoomed for a phone, and only for a phone", {"skip": ch
 		const pg = await open("web/kvm/index.html", 390, 700);
 		const m = await pg.eval(OPEN);
 		await pg.close();
-		assert.equal(m.zoom, "2", "the iframe is not zoomed");
+		assert.notEqual(m.transform, "none", "the iframe is not scaled");
 		assert.ok(m.rendered >= m.window - 10,
 			`the terminal fills ${m.rendered}px of a ${m.window}px window -- the zoom shrank its box`);
 		assert.ok(m.tall > 100, `the terminal is ${m.tall}px tall`);
-		assert.ok(Math.abs(m.inner - m.rendered / 2) <= 2,
-			`the terminal sees ${m.inner}px inside a ${m.rendered}px box: that is not a 2x zoom`);
+		assert.ok(m.inner < m.rendered * 0.6,
+			`the terminal sees ${m.inner}px inside a ${m.rendered}px box: it is not being scaled up`);
 	});
 
 	test("the desktop terminal is left alone", async () => {
 		const pg = await open("web/kvm/index.html", 1280, 900, false);
 		const m = await pg.eval(OPEN);
 		await pg.close();
-		assert.equal(m.zoom, "1", "the desktop terminal must not be zoomed");
+		assert.equal(m.transform, "none", "the desktop terminal must not be scaled");
 		assert.equal(m.inner, m.rendered,
 			`the desktop terminal sees ${m.inner}px inside a ${m.rendered}px box`);
 	});

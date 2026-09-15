@@ -327,3 +327,15 @@ div.keypad-type {
 :root[data-ui="mobile"][data-typing="1"] div#keyboard-compact div[data-keypad-layer] {
 	display: none;
 }
+
+
+/* The wheel buttons are a desktop redundancy -- a mouse has a wheel -- and a
+   phone's only scroll that does not compete with the browser's pinch. */
+div#mouse-wheel-row {
+	display: none;
+}
+
+:root[data-ui="mobile"] div#mouse-buttons div#mouse-wheel-row {
+	display: flex;
+	margin-top: 5px;
+}

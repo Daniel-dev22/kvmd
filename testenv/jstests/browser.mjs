@@ -191,6 +191,11 @@ async function newPage(port) {
 			type, x, y, button, "clickCount": clicks,
 			"buttons": (type === "mouseReleased" || button === "none" ? 0 : 1),
 		}),
+		// A real pinch, through the compositor -- the browser's own gesture
+		// recogniser, not two touch points we move apart and hope.
+		"pinch": (x, y, scale) => send("Input.synthesizePinchGesture", {
+			x, y, "scaleFactor": scale, "relativeSpeed": 800,
+		}),
 		"eval": async (expression) => {
 			const out = await send("Runtime.evaluate", {
 				expression, "returnByValue": true, "awaitPromise": true,

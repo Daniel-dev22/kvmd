@@ -81,6 +81,12 @@ div#stream-box {
 	height: 100%;
 	object-fit: contain;
 	position: relative;
+	/* Pinch to zoom belongs to the browser here: it is the only way to read a
+	   1920x1080 console on a 390px screen, where a character is 4.8px wide.
+	   `manipulation` on the body already allows it; naming it on the stream
+	   says that panning is NOT on offer, so a two-finger drag still reaches the
+	   handler that scrolls the host. */
+	touch-action: pinch-zoom;
 	/* A long press on the video is a right click on the HOST. Without this,
 	   iOS Safari answers it with its own "Save Image" callout over the stream
 	   -- the page prevents the touch default, but the callout is a separate
@@ -181,23 +187,24 @@ canvas#stream-canvas {
 
 
 /* =========================================================================
-   The terminal, zoomed.
+   The terminal, scaled.
 
    ttyd's terminal is somebody else's application in an iframe, and the only
-   thing we can ask it for is a font size on its URL. It reads one -- the
-   parser is right there in the build on the appliance -- but it was reported
-   twice from a phone as having no effect, and nothing this side of the iframe
-   can prove otherwise.
+   thing we can ask it for is a font size on its URL. It reads one -- the parser
+   is right there in the build on the appliance -- and 18px and then 30px were
+   both reported from the phone as having no effect. So the size is taken here
+   instead, where nothing upstream gets a vote.
 
-   `zoom` needs nothing from ttyd: it is applied here, to the element. The
-   terminal is handed a viewport of half the width, lays itself out for THAT,
-   and every pixel it draws comes out twice the size -- its own font, its
-   scrollbar, its cursor. 📏 On a 390px phone the terminal sees 195px, which at
-   xterm's default 15px is about 21 columns, drawn at an effective 30px.
+   `transform`, not `zoom`. Both scale the iframe in Blink, and `zoom` also
+   halves the child's layout viewport there (measured: 193px inside a 386px
+   box). But a subframe is its own rendering context, and WebKit does not
+   propagate `zoom` into one -- which is exactly the shape of "it didn't zoom"
+   from a phone. A transform composites the rendered subframe, in every engine.
 
-   The width compensates for the zoom so the iframe still fills its window: a
-   percentage resolves against the unzoomed parent and the result is then
-   scaled, so 50% of the window renders as 100% of it.
+   The iframe is laid out at half size and drawn at twice it, so it still fills
+   its window: the terminal is handed ~193px on a 390px phone, lays itself out
+   for that -- about 21 columns at xterm's own 15px default -- and every pixel
+   it draws lands at twice the size.
    ========================================================================= */
 
 div#webterm-window iframe {
@@ -207,15 +214,15 @@ div#webterm-window iframe {
 }
 
 :root[data-ui="mobile"] div#webterm-window {
-	--webterm-zoom: 2;
+	--webterm-scale: 2.25;
 }
 
 :root[data-ui="mobile"] div#webterm-window iframe {
-	zoom: var(--webterm-zoom);
-	width: 100%;
-	/* The window is a flex column: let it hand the iframe the space that is
-	   left, rather than a percentage of a box that zoom has already scaled. */
-	height: auto;
-	flex: 1;
-	align-self: stretch;
+	/* Half the box, drawn at twice the size, anchored to the top-left so the
+	   scale grows into the window rather than out of it. */
+	width: calc(100% / var(--webterm-scale));
+	height: calc(100% / var(--webterm-scale));
+	flex: 0 0 auto;
+	transform: scale(var(--webterm-scale));
+	transform-origin: top left;
 }

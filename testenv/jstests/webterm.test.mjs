@@ -27,11 +27,11 @@ test("nothing asks ttyd for a font size any more", () => {
 		"webterm.js must not put a font size on the URL");
 });
 
-test("the zoom is declared where the terminal can be seen, and only in compact", () => {
+test("the scale is declared where the terminal can be seen, and only in compact", () => {
 	const css = read("web/share/css/kvm/stream.css");
-	assert.match(css, /--webterm-zoom/, "the zoom factor has to exist");
-	const compact = css.slice(css.indexOf("--webterm-zoom"));
-	assert.match(compact, /zoom: var\(--webterm-zoom\)/);
+	assert.match(css, /--webterm-scale/, "the scale factor has to exist");
+	const compact = css.slice(css.indexOf("--webterm-scale"));
+	assert.match(compact, /transform: scale\(var\(--webterm-scale\)\)/);
 	assert.match(css, /:root\[data-ui="mobile"\] div#webterm-window \{/,
-		"the factor must be scoped to the compact layout, or the desktop terminal is zoomed too");
+		"the factor must be scoped to the compact layout, or the desktop terminal is scaled too");
 });

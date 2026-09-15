@@ -244,7 +244,16 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchStartHandler = function(ev) {
-		ev.preventDefault();
+		// One finger is ours: preventDefault stops the page panning under it and
+		// stops the browser replaying the whole gesture as mouse events. TWO is
+		// the browser's -- it is the only way to zoom into the host's console on
+		// a phone, and a 1920x1080 console on a 390px screen is 4.8px per
+		// character. Preventing it here is what made the page unpinchable:
+		// 📏 the same synthesized pinch takes the launcher from scale 1 to 2.5
+		// and left /kvm at 1.
+		if (ev.targetTouches.length === 1) {
+			ev.preventDefault();
+		}
 		if (ev.targetTouches.length === 1) {
 			// The first finger on the video: this is where a gesture begins,
 			// and the only honest moment to decide whether it may click.
@@ -264,7 +273,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchMoveHandler = function(ev) {
-		ev.preventDefault();
+		if (ev.targetTouches.length === 1) {
+			ev.preventDefault();
+		}
 		if (__gesture_live) {
 			__gestures.move(__getTouchPoints(ev));
 		}
@@ -301,7 +312,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchEndHandler = function(ev) {
-		ev.preventDefault();
+		if (ev.targetTouches.length === 0) {
+			ev.preventDefault();
+		}
 		__sendPlannedMove();
 		__touch_pos = null;
 		if (__gesture_live) {
@@ -313,7 +326,6 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchCancelHandler = function(ev) {
-		ev.preventDefault();
 		if (__gesture_live) {
 			__gestures.cancel(__getTouchPoints(ev));
 		}

@@ -706,6 +706,9 @@ describe("a finger can work the menus", {"skip": chromiumPath() ? false : "no ch
 				w: Math.round(el.getBoundingClientRect().width),
 				h: Math.round(el.getBoundingClientRect().height),
 				cut: el.scrollWidth - el.clientWidth,
+				// The row it is IN, not where it happens to be painted: the two
+				// disagree when a window is measured mid-layout.
+				row: [...el.parentElement.parentElement.children].indexOf(el.parentElement),
 			})).filter((k) => k.w > 0);
 		})()`);
 		await pg.close();
@@ -714,15 +717,22 @@ describe("a finger can work the menus", {"skip": chromiumPath() ? false : "no ch
 			`mouse buttons with clipped labels: ${JSON.stringify(keys.filter((k) => k.cut > 1))}`);
 		assert.deepEqual(keys.filter((k) => k.h < MIN_TARGET), [],
 			`mouse buttons under ${MIN_TARGET}px tall: ${JSON.stringify(keys)}`);
-		// They share the row: shrink-to-fit would leave three small buttons
-		// huddled at the left of a 390px pad.
-		const widest = Math.max(...keys.map((k) => k.w));
-		const narrowest = Math.min(...keys.map((k) => k.w));
-		// They carry a right margin except the last, so they are not pixel-equal.
-		assert.ok(widest - narrowest <= 10,
-			`the mouse buttons are not equal width (${keys.map((k) => k.w).join("/")}) -- they should share the row`);
-		assert.ok(keys.reduce((a, k) => a + k.w, 0) > 300,
-			`the mouse buttons total ${keys.reduce((a, k) => a + k.w, 0)}px on a 390px pad -- they are not filling it`);
+		// Each ROW shares its width: shrink-to-fit would leave small buttons
+		// huddled at the left of a 390px pad. Per row, because the pad has two
+		// on a phone -- the three buttons, and the wheel, which is the scroll
+		// that does not compete with the browser's pinch on the video.
+		const rows = [...new Set(keys.map((k) => k.row))];
+		assert.ok(rows.length >= 1, "no mouse pad rows at all");
+		for (const row of rows) {
+			const mine = keys.filter((k) => k.row === row);
+			const widest = Math.max(...mine.map((k) => k.w));
+			const narrowest = Math.min(...mine.map((k) => k.w));
+			// They carry a right margin except the last, so not pixel-equal.
+			assert.ok(widest - narrowest <= 10,
+				`a pad row is not equal width (${mine.map((k) => k.w).join("/")}) -- they should share it`);
+			assert.ok(mine.reduce((a, k) => a + k.w, 0) > 300,
+				`a pad row totals ${mine.reduce((a, k) => a + k.w, 0)}px on a 390px pad -- it is not filling it`);
+		}
 	});
 
 	test("a menu button is tall enough to hit", async () => {
