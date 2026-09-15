@@ -1,9 +1,8 @@
 li.right#system-dropdown
+	//- The link/video/keyboard/mouse LEDs are in #navbar-status now: they are
+	//- global status, not part of this section, and they made this the widest
+	//- button on the bar.
 	.menu-item.menu-button(href="#")
-		+navbar_led("link-led", "led-link")
-		+navbar_led("stream-led", "led-video")
-		+navbar_led("hid-keyboard-led", "led-hid-keyboard")
-		+navbar_led("hid-mouse-led", "led-hid-mouse")
 		span System
 
 	.hidden.menu#system-menu

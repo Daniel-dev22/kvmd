@@ -129,6 +129,20 @@ function __WindowManager() {
 			});
 		}
 
+		// Compact: the sections are a grid behind one button. Bound as a press
+		// rather than a click, exactly like the dropdown triggers beside it, so
+		// the sheet appears under the finger that asked for it.
+		let el_sections_bt = $("navbar-menu-button");
+		if (el_sections_bt !== null) {
+			tools.el.setOnDown(el_sections_bt, function() {
+				// Read the state BEFORE closing everything, or the close makes
+				// every press an open.
+				let want = !self.isSectionsOpen();
+				__closeAllMenues();
+				self.setSectionsOpen(want);
+			});
+		}
+
 		window.addEventListener("mouseup", (ev) => __globalMouseButtonHandler(ev.target));
 		window.addEventListener("touchend", (ev) => __globalMouseButtonHandler(ev.target));
 
@@ -490,6 +504,17 @@ function __WindowManager() {
 		}
 	};
 
+	// The compact grid of sections is open. It is a state of the navbar, so the
+	// class and the question about it both live here.
+	self.isSectionsOpen = function() {
+		return $("navbar").classList.contains("navbar-sections-open");
+	};
+
+	self.setSectionsOpen = function(on) {
+		$("navbar").classList.toggle("navbar-sections-open", on);
+		$("navbar-menu-button").setAttribute("aria-expanded", String(on));
+	};
+
 	// A navbar menu is open. The stream asks before turning a touch into a
 	// click: the tap that dismisses a sheet lands on the video underneath it,
 	// and dismissing something is not clicking the host. Menus are this
@@ -533,10 +558,14 @@ function __WindowManager() {
 
 		if (all_hidden) {
 			__activateLastWindow();
+		} else {
+			// The sheet that just opened IS the answer to the grid.
+			self.setSectionsOpen(false);
 		}
 	};
 
 	var __closeAllMenues = function() {
+		self.setSectionsOpen(false);
 		for (let el_bt of $$("menu-button")) {
 			let el_menu = el_bt.parentElement.querySelector(".menu");
 			el_bt.classList.remove("menu-button-pressed");
@@ -567,6 +596,11 @@ function __WindowManager() {
 		if (el.closest(".modal")) {
 			// Клик по модальному полю возвращает фокус в окно
 			__activateWindow(el.closest(".modal"));
+			return;
+		}
+
+		if (el.closest("#navbar-menu-button")) {
+			// Its own press already decided what the grid should do.
 			return;
 		}
 

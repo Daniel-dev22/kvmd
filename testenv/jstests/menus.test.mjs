@@ -441,164 +441,147 @@ describe("the switch port list is readable on a phone", {"skip": chromiumPath() 
 	}
 });
 
-describe("the compact strip says that it scrolls", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
-	test("every dropdown has an explicit compact order", async () => {
-		// A dropdown added without one gets the initial `order: 0` and lands in
-		// front of System. That is loud on screen and this names it.
-		const pg = await open(390);
-		const missing = await pg.eval(`(() => {
-			${REVEAL}
-			return [...document.querySelectorAll("ul#navbar > li[id$='-dropdown']")]
-				.filter((li) => getComputedStyle(li).order === "0")
-				.map((li) => li.id);
+describe("the sections are a grid behind one button", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// 📏 What this replaces: the same items as one horizontally scrollable
+	// strip. With a Switch attached it measured 815px on a 390px screen --
+	// 425px (52%) past the right edge, 495px (61%) at 320px -- and ATX, the
+	// fourth item, started at x=376. Seven of nine were never seen.
+	//
+	// Every hardware-gated item is revealed in the SAME evaluate that measures,
+	// because the app puts the gate back about a second after load and a strip
+	// with no Switch in it passes for the wrong reason.
+	// A statement, so it can be pasted into a larger evaluate as well as run on
+	// its own -- slicing an IIFE apart to reuse its body produces a syntax error
+	// that CDP reports only as "Invalid parameters".
+	const REVEAL_JS = `for (const id of ["switch-dropdown", "gpio-dropdown", "msd-dropdown", "atx-dropdown"]) {
+		const el = document.getElementById(id);
+		if (el !== null) { el.classList.remove("feature-disabled"); }
+	}`;
+	const REVEAL = `(() => { ${REVEAL_JS} return true; })()`;
+
+	const openGrid = async (pg) => {
+		const at = await pg.eval(`(() => {
+			const r = document.getElementById("navbar-menu-button").getBoundingClientRect();
+			if (r.width === 0) { throw new Error("the Menu button is not on screen"); }
+			return {"x": r.left + r.width / 2, "y": r.top + r.height / 2};
 		})()`);
-		await pg.close();
-		assert.deepEqual(missing, [],
-			`these dropdowns have no compact order and will render before System: ${missing.join(", ")}`);
-	});
+		await pg.touch("touchStart", [at]);
+		await pg.touch("touchEnd", []);
+	};
 
-	test("the operational dropdowns come first", async () => {
-		const pg = await open(390);
-		const order = await pg.eval(`(() => {
-			${REVEAL}
-			return [...document.querySelectorAll("ul#navbar > li[id$='-dropdown']")]
-				.sort((a, b) => Number(getComputedStyle(a).order) - Number(getComputedStyle(b).order))
-				.map((li) => li.id);
-		})()`);
-		await pg.close();
-		assert.deepEqual(order, COMPACT_ORDER,
-			"the Switch is the item users reach for and DOM order puts it last; see navbar.css");
-	});
-
-	test("the Switch is on screen or peeking, never a whole screen away", async () => {
-		// The report this phase came from: with a Switch attached it sat 726px
-		// past the right edge of a 390px screen, behind two full swipes.
-		const pg = await open(390);
-		const m = await pg.eval(`(() => {
-			${REVEAL}
-			const li = document.getElementById("switch-dropdown");
-			const b = li.getBoundingClientRect();
-			return {left: Math.round(b.left), width: Math.round(b.width), inner: 390};
-		})()`);
-		await pg.close();
-		assert.ok(m.width > 0, "precondition: the Switch item must be revealed for this to measure anything");
-		assert.ok(m.left < m.inner,
-			`the Switch starts at ${m.left}px on a ${m.inner}px screen -- it must at least peek past the edge`);
-	});
-
-	test("an edge cue is painted over the content the strip is hiding", async () => {
-		// Geometry, not just presence. A cue can satisfy "has a gradient and is
-		// positioned" while being 0x0, adding width to the strip, fading the
-		// wrong way, or -- as shipped once -- sorted into the MIDDLE of the
-		// strip by the order values below, painting over the logo.
-		const pg = await open(390);
-		const m = await pg.eval(`(() => {
-			${REVEAL}
-			const nav = document.getElementById("navbar");
-			const after = getComputedStyle(nav, "::after");
-			const before = getComputedStyle(nav, "::before");
-			return {
-				scrolls: nav.scrollWidth > nav.clientWidth,
-				a: {img: after.backgroundImage, pos: after.position, op: after.opacity,
-					w: after.width, h: after.height, right: after.right, top: after.top},
-				b: {img: before.backgroundImage, pos: before.position, op: before.opacity,
-					w: before.width, h: before.height, left: before.left},
-				// The cue must not participate in the strip's layout at all: if
-				// it did, it would both take a slot among the items and leave a
-				// dead gap past the last one.
-				scrollWidth: nav.scrollWidth,
-				itemsWidth: Math.round([...nav.children]
-					.reduce((sum, el) => sum + el.getBoundingClientRect().width, 0)),
-				itemHeight: Math.round(nav.querySelector("li").getBoundingClientRect().height),
-			};
-		})()`);
-		await pg.close();
-		assert.ok(m.scrolls, "precondition: the strip must actually overflow for a cue to be meaningful");
-
-		assert.equal(m.a.pos, "fixed", "the right cue must be pinned to the viewport edge, not laid out among the items");
-		assert.equal(m.a.right, "0px", "the right cue must sit at the right edge");
-		assert.equal(m.a.top, "0px", "the right cue must sit at the top of the strip");
-		assert.notEqual(m.a.w, "0px", "the right cue has no width, so nothing is painted");
-		assert.equal(m.a.h, `${m.itemHeight}px`, `the cue is ${m.a.h} tall against a ${m.itemHeight}px strip`);
-		assert.match(m.a.img, /gradient\(to left/, "the right cue must fade towards the content it covers");
-		assert.equal(m.a.op, "1", "at rest there IS content past the right edge, so the cue must be on");
-
-		assert.equal(m.b.pos, "fixed", "the left cue must be pinned to the viewport edge");
-		assert.equal(m.b.left, "0px", "the left cue must sit at the left edge");
-		assert.notEqual(m.b.w, "0px", "the left cue has no width");
-		assert.match(m.b.img, /gradient\(to right/, "the left cue must fade towards the content it covers");
-		assert.equal(m.b.op, "0", "at rest nothing is hidden to the left, so that cue must be off");
-
-		assert.equal(m.scrollWidth, m.itemsWidth,
-			`the strip scrolls ${m.scrollWidth}px for ${m.itemsWidth}px of items -- the cue is adding width and leaving a dead gap`);
-	});
-
-	test("the right cue stays on until the strip is actually at its end", async () => {
-		// `animation-range` decides WHERE the fade happens. Widened to the whole
-		// strip it is half-faded everywhere, which reads as "nearly at the end"
-		// from the very first screenful.
-		const pg = await open(390);
-		const read = `(() => {
-			const nav = document.getElementById("navbar");
-			const a = nav.getAnimations({subtree: true})
-				.filter((x) => x.timeline && x.timeline.constructor.name === "ScrollTimeline");
-			const out = {};
-			for (const x of a) { out[x.animationName] = Number(x.effect.getComputedTiming().progress); }
-			return out;
-		})()`;
-		await pg.eval(REVEAL);
-		const supported = await pg.eval(`CSS.supports("animation-timeline: --x")`);
-		if (!supported) {
+	for (const width of [320, 360, 390]) {
+		test(`the bar itself fits at ${width}px, with everything attached`, async () => {
+			const pg = await open(width);
+			const m = await pg.eval(`(() => {
+				${REVEAL_JS}
+				const nav = document.getElementById("navbar");
+				return {
+					"strip": nav.scrollWidth,
+					"client": nav.clientWidth,
+					"doc": document.documentElement.scrollWidth,
+					"menuButton": !!document.getElementById("navbar-menu-button"),
+				};
+			})()`);
 			await pg.close();
-			return; // The static fallback is asserted by the test above.
-		}
-		const at = async (frac) => {
-			await pg.eval(`(() => { const n = document.getElementById("navbar");
-				n.scrollLeft = (n.scrollWidth - n.clientWidth) * ${frac}; })()`);
-			await pg.eval("new Promise((r) => setTimeout(r, 120))");
-			return pg.eval(read);
-		};
-		const start = await at(0);
-		const middle = await at(0.5);
-		const end = await at(1);
+			assert.equal(m.menuButton, true, "the compact layout has no Menu button");
+			assert.ok(m.strip <= m.client,
+				`the bar needs ${m.strip}px of a ${m.client}px screen -- it is a strip again`);
+			assert.ok(m.doc <= width, `the page is ${m.doc}px wide on a ${width}px device`);
+		});
+	}
+
+	test("the grid holds every section, plus the keyboard and the mouse", async () => {
+		const pg = await open(390);
+		await pg.eval(REVEAL);
+		await openGrid(pg);
+		const m = await pg.eval(`(() => {
+			${REVEAL_JS}
+			const tiles = [...document.querySelectorAll("#navbar-sections > li")]
+				.filter((li) => li.getBoundingClientRect().height > 0)
+				.map(function(li) {
+					const r = li.getBoundingClientRect();
+					const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+					return {
+						"id": li.id || li.className,
+						"w": Math.round(r.width), "h": Math.round(r.height),
+						"onscreen": (r.bottom <= window.innerHeight && r.top >= 0),
+						"tappable": li.contains(top),
+					};
+				});
+			return tiles;
+		})()`);
 		await pg.close();
-		assert.equal(start["navbar-cue-out"], 0, "the right cue must be fully on at the start");
-		assert.equal(middle["navbar-cue-out"], 0,
-			"the right cue is already fading half way along the strip -- the range covers the whole scroll instead of its end");
-		assert.equal(end["navbar-cue-out"], 1, "the right cue must be gone once there is nothing past the edge");
-		assert.equal(start["navbar-cue-in"], 0, "the left cue must be off at the start");
-		assert.equal(end["navbar-cue-in"], 1, "the left cue must be on once content is hidden to the left");
+		const want = ["keyboard-section", "mouse-section", "system-dropdown", "atx-dropdown",
+			"msd-dropdown", "macro-dropdown", "text-dropdown", "shortcuts-dropdown",
+			"gpio-dropdown", "switch-dropdown"];
+		assert.deepEqual(m.map((t) => t.id).sort(), [...want].sort(),
+			"the grid does not offer exactly the sections this UI has");
+		for (const tile of m) {
+			assert.ok(tile.w >= MIN_TARGET && tile.h >= MIN_TARGET,
+				`${tile.id} is ${tile.w}x${tile.h}`);
+			assert.equal(tile.onscreen, true, `${tile.id} is off the screen`);
+			assert.equal(tile.tappable, true, `${tile.id} is covered by something else`);
+		}
 	});
 
-	test("the cue tracks the scroll position where the engine can do that", async () => {
-		// `scroll(self inline)` looks right and is inert here: applied to a
-		// pseudo-element `self` resolves to the PSEUDO, which is not a scroll
-		// container, so the timeline attaches, reports playState "running", and
-		// holds currentTime null forever. Only the timeline's own activity
-		// distinguishes that from a working cue.
+	test("choosing a section shows its sheet and puts the grid away", async () => {
 		const pg = await open(390);
+		await openGrid(pg);
+		const at = await pg.eval(`(() => {
+			const r = document.querySelector("#system-dropdown .menu-button").getBoundingClientRect();
+			return {"x": r.left + r.width / 2, "y": r.top + r.height / 2};
+		})()`);
+		await pg.touch("touchStart", [at]);
+		await pg.touch("touchEnd", []);
 		const m = await pg.eval(`(() => {
-			${REVEAL}
-			const nav = document.getElementById("navbar");
-			const anims = nav.getAnimations({subtree: true})
-				.filter((a) => a.timeline && a.timeline.constructor.name === "ScrollTimeline");
+			const sheet = document.getElementById("system-menu").getBoundingClientRect();
 			return {
-				supported: CSS.supports("animation-timeline: scroll()"),
-				count: anims.length,
-				active: anims.filter((a) => a.currentTime !== null).length,
-				names: anims.map((a) => a.animationName),
+				"gridOpen": document.getElementById("navbar").classList.contains("navbar-sections-open"),
+				"sheetW": Math.round(sheet.width), "sheetH": Math.round(sheet.height),
 			};
 		})()`);
 		await pg.close();
-		if (!m.supported) {
-			// The static rules stand on their own: right cue on, left cue off,
-			// which is correct at the position the strip starts in.
-			assert.equal(m.count, 0, "no scroll timelines should be attached where they are unsupported");
-			return;
-		}
-		assert.equal(m.count, 2, `both edge cues must be driven by the strip's scroll, got ${m.names.join(", ")}`);
-		assert.equal(m.active, 2,
-			"the scroll timeline is attached but INACTIVE -- currentTime is null, so the cue never moves");
+		assert.equal(m.gridOpen, false, "the grid stayed open behind the sheet it opened");
+		// Not the class: every section's sheet is a DESCENDANT of the grid
+		// container, and hiding that container hid the sheets with it.
+		assert.ok(m.sheetW > 100 && m.sheetH > 100,
+			`the System sheet measured ${m.sheetW}x${m.sheetH}: it opened where nobody can see it`);
+	});
+
+	test("with the grid shut, nothing of it is left over the video", async () => {
+		// It is absolutely positioned over the stream: a container with height
+		// but no paint eats every tap that lands on it.
+		const pg = await open(390);
+		const m = await pg.eval(`(() => {
+			const r = document.getElementById("navbar-sections").getBoundingClientRect();
+			const nav = document.getElementById("navbar").getBoundingClientRect();
+			return {"h": Math.round(r.height),
+				"under": (document.elementFromPoint(195, Math.round(nav.bottom) + 10) || {}).id};
+		})()`);
+		await pg.close();
+		assert.equal(m.h, 0, `the closed grid is ${m.h}px tall over the video`);
+		assert.notEqual(m.under, "navbar-sections", "the closed grid is still catching taps");
+	});
+
+	test("the desktop navbar is not touched by any of this", async () => {
+		const pg = await open(1280, 900, false);
+		const m = await pg.eval(`(() => {
+			${REVEAL_JS}
+			const nav = document.getElementById("navbar");
+			const items = [...nav.querySelectorAll("li")].filter((li) => li.getBoundingClientRect().height > 0);
+			return {
+				"sections": getComputedStyle(document.getElementById("navbar-sections")).display,
+				"menuButton": document.getElementById("navbar-menu-button").getBoundingClientRect().height,
+				"rows": [...new Set(items.map((li) => Math.round(li.getBoundingClientRect().top)))].length,
+				"strip": nav.scrollWidth <= nav.clientWidth,
+			};
+		})()`);
+		await pg.close();
+		assert.equal(m.sections, "contents",
+			"the sections container must not exist as a box on the desktop");
+		assert.equal(m.menuButton, 0, "the Menu button is showing on the desktop");
+		assert.equal(m.rows, 1, "the desktop navbar is no longer one row");
+		assert.equal(m.strip, true, "the desktop navbar overflows");
 	});
 });
 

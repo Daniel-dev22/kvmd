@@ -82,6 +82,16 @@ ul#navbar
 			div &larr;
 			img.svg-gray(src=`${svg_dir}/logo.svg` alt="&pi;-kvm")
 
+	//- Link, video, keyboard and mouse. These lived inside the System button,
+	//- which made it the widest thing on the bar -- and in the compact layout
+	//- they scrolled off with it. Status you cannot see is not status.
+	li.left#navbar-status
+		.menu-item
+			+navbar_led("link-led", "led-link")
+			+navbar_led("stream-led", "led-video")
+			+navbar_led("hid-keyboard-led", "led-hid-keyboard")
+			+navbar_led("hid-mouse-led", "led-hid-mouse")
+
 	include navbar-health.pug
 
 	.hidden#navbar-stream-info(data-wm-on-full-tab)
@@ -95,11 +105,35 @@ ul#navbar
 				button(data-wm-navbar-close style="width: 50px; height: 30px;")
 				button(data-wm-normalize style="width: 30px; height: 30px;")
 
-	include navbar-system.pug
-	include navbar-atx.pug
-	include navbar-msd.pug
-	include navbar-macro.pug
-	include navbar-text.pug
-	include navbar-shortcuts.pug
-	include navbar-gpio.pug
-	include navbar-switch.pug
+	//- Compact only: one button, and the sections behind it. The strip was
+	//- 815px wide on a 390px screen with a Switch attached -- 52% of it past
+	//- the right edge, with ATX onwards never seen. Desktop renders the
+	//- sections exactly as before; #navbar-sections is display: contents there.
+	li.right.navbar-compact-only#navbar-menu
+		.menu-item.menu-action#navbar-menu-button(role="button" tabindex="0")
+			div &#9776;
+			span Menu
+
+	#navbar-sections
+		//- The two things a phone opens constantly, at the top level instead of
+		//- the last row of the System sheet. Compact only: on desktop these
+		//- windows are opened from System, and the sections container is
+		//- display: contents, so without the class they would appear in the
+		//- desktop navbar too.
+		li.right.navbar-compact-only#keyboard-section
+			.menu-item.menu-action(data-wm-window-show="keyboard-window" role="button" tabindex="0")
+				img.svg-gray(src=`${svg_dir}/led-hid-keyboard.svg` alt="")
+				span Keyboard
+		li.right.navbar-compact-only#mouse-section
+			.menu-item.menu-action(data-wm-window-show="mouse-window" role="button" tabindex="0")
+				img.svg-gray(src=`${svg_dir}/led-hid-mouse.svg` alt="")
+				span Mouse
+
+		include navbar-system.pug
+		include navbar-atx.pug
+		include navbar-msd.pug
+		include navbar-macro.pug
+		include navbar-text.pug
+		include navbar-shortcuts.pug
+		include navbar-gpio.pug
+		include navbar-switch.pug

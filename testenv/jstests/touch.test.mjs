@@ -383,12 +383,13 @@ describe("a phone can reach the keyboard and the mouse", {"skip": chromiumPath()
 			assert.deepEqual(shut, {"keyboard": true, "mouse": true},
 				"neither window should be open before it is asked for");
 
+			await tap(pg, await pg.eval(centre("#navbar-menu-button")));
 			await tap(pg, await pg.eval(centre("#system-dropdown .menu-button")));
 			const reach = await pg.eval(`(() => {
 				const menu = document.getElementById("system-menu");
 				const out = {"scrolled": menu.scrollTop, "open": !menu.classList.contains("hidden")};
 				for (const what of ["keyboard-window", "mouse-window"]) {
-					const el = document.querySelector('[data-wm-window-show="' + what + '"]');
+					const el = menu.querySelector('[data-wm-window-show="' + what + '"]');
 					const r = el.getBoundingClientRect();
 					const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
 					out[what] = {
@@ -418,7 +419,7 @@ describe("a phone can reach the keyboard and the mouse", {"skip": chromiumPath()
 				assert.ok(reach[what].tall >= MIN_TARGET, `${what} is ${reach[what].tall}px tall`);
 			}
 
-			await tap(pg, await pg.eval(centre(`[data-wm-window-show="keyboard-window"]`)));
+			await tap(pg, await pg.eval(centre(`#system-menu [data-wm-window-show="keyboard-window"]`)));
 			const typing = await pg.eval(`(() => {
 				const bar = document.getElementById("hid-type-input");
 				const r = bar.getBoundingClientRect();
@@ -640,8 +641,8 @@ describe("the host's screen takes a click from a finger", {"skip": chromiumPath(
 		// It lands on the video, because that is what is under the sheet.
 		const pg = await open();
 		await pg.eval(HID_START);
-		const item = await pg.eval(centre("#system-dropdown .menu-button"));
-		await tap(pg, item);
+		await tap(pg, await pg.eval(centre("#navbar-menu-button")));
+		await tap(pg, await pg.eval(centre("#system-dropdown .menu-button")));
 		const open_menu = await pg.eval(`(() => {
 			const m = document.getElementById("system-menu");
 			return {"open": !m.classList.contains("hidden"),

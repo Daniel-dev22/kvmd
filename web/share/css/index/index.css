@@ -95,3 +95,38 @@ tr.server {
 		display: none;
 	}
 }
+
+
+/* =========================================================================
+   Compact: the launcher's apps are one row.
+
+   The tiles are 100px wide with 5px margins and float: left inside a shrink-to-
+   fit table, so three of them need 330px and a phone gives them 320-390 minus
+   the page's own padding: KVM and Terminal took the first row and Logout
+   wrapped onto a second, which is the whole of what the launcher offers split
+   across two lines. They share the row instead, down to the narrowest phone.
+   ========================================================================= */
+
+:root[data-ui="mobile"] div#apps-box {
+	display: block;
+}
+
+:root[data-ui="mobile"] div#apps-box ul#apps {
+	display: flex;
+	justify-content: center;
+	gap: 8px;
+}
+
+:root[data-ui="mobile"] div#apps-box ul#apps li {
+	float: none;
+	margin: 0;
+	/* Equal shares of whatever the screen has, never wider than the desktop
+	   tile: min-width 0 is what lets a flex item shrink below its content. */
+	flex: 1 1 0;
+	min-width: 0;
+	max-width: 110px;
+}
+
+:root[data-ui="mobile"] div#apps-box ul#apps li div.app {
+	width: auto;
+}

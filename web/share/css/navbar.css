@@ -298,161 +298,8 @@ ul.navbar-bg-tips li a {
 	}
 }
 
-/* Compact: the same items in the same order, as one horizontally scrollable
-   strip. Nothing is removed and nothing is hidden behind a hamburger -- the
-   overflow is visible and swipeable. */
-:root[data-ui="mobile"] ul#navbar {
-	display: flex;
-	flex-wrap: nowrap;
-	overflow-x: auto;
-	overflow-y: hidden;
-	scrollbar-width: none;
-	-webkit-overflow-scrolling: touch;
-	/* Named so the edge cues below can hang off this element's scroll position;
-	   see the @supports block. Inert where scroll timelines are unsupported. */
-	scroll-timeline: --navbar-strip inline;
-	padding-left: env(safe-area-inset-left);
-	padding-right: env(safe-area-inset-right);
-}
-
-:root[data-ui="mobile"] ul#navbar::-webkit-scrollbar {
-	display: none;
-}
-
-/* The strip is wider than any phone -- 621px at 390px on a bare device, and
-   1287px once a PiKVM Switch is attached -- and a flush edge says nothing
-   about that. This is the whole of the "the HDMI switcher vanished" report:
-   nothing was missing, but the Switch sat 726px past the right edge with no
-   affordance that the strip scrolls at all.
-
-   A fade over whichever edge still has content beyond it is that affordance.
-   The pseudo-elements are flex items pinned with `position: sticky` and pulled
-   back over the content by a negative margin, so they overlay the strip
-   without adding to its scroll width. */
-:root[data-ui="mobile"] ul#navbar::before,
-:root[data-ui="mobile"] ul#navbar::after {
-	content: "";
-	/* Deliberately NOT a flex item. As one, its place in the strip came from
-	   document order -- and the `order` values further down sort ahead of it,
-	   which moved the right-hand cue into the middle of the strip, painting it
-	   over the logo instead of over the content past the edge. Pinned to the
-	   viewport edge nothing about item ordering can reach it, and it adds
-	   nothing to the strip's scroll width. */
-	position: fixed;
-	top: 0;
-	/* One row of 50px items; see li.left / li.right above. */
-	height: 50px;
-	width: 28px;
-	z-index: 1;
-	pointer-events: none;
-}
-:root[data-ui="mobile"] ul#navbar::before {
-	left: env(safe-area-inset-left, 0px);
-	background: linear-gradient(to right, var(--cs-navbar-default-bg), transparent);
-	/* Nothing is hidden to the left until the strip has been scrolled, and
-	   without a scroll timeline this is the state that stays. */
-	opacity: 0;
-}
-:root[data-ui="mobile"] ul#navbar::after {
-	right: env(safe-area-inset-right, 0px);
-	background: linear-gradient(to left, var(--cs-navbar-default-bg), transparent);
-}
-
-/* Where scroll-driven animations exist, each cue is shown only while there is
-   really something past that edge. Where they do not, the rules above stand on
-   their own: the right-hand cue is always on and the left-hand one never is,
-   which is correct at the only position the strip starts in. */
-@supports (animation-timeline: --navbar-strip) {
-	:root[data-ui="mobile"] ul#navbar::before,
-	:root[data-ui="mobile"] ul#navbar::after {
-		/* animation-duration is deliberately left at its initial `auto`: on a
-		   progress-based timeline that is what scales the animation across
-		   animation-range. Any finite duration collapses it to a step. */
-		animation-timing-function: linear;
-		animation-fill-mode: both;
-		/* A NAMED timeline, declared on the strip and inherited by lookup.
-		   `scroll(self inline)` does not work here: applied to a pseudo-element
-		   `self` resolves to the pseudo, which is not a scroll container, and
-		   the timeline silently stays inactive -- attached, `playState:
-		   running`, and `currentTime: null` forever. */
-		animation-timeline: --navbar-strip;
-	}
-	:root[data-ui="mobile"] ul#navbar::before {
-		animation-name: navbar-cue-in;
-		animation-range: 0 28px;
-	}
-	:root[data-ui="mobile"] ul#navbar::after {
-		animation-name: navbar-cue-out;
-		animation-range: calc(100% - 28px) 100%;
-	}
-}
-@keyframes navbar-cue-in {
-	from { opacity: 0; }
-	to { opacity: 1; }
-}
-@keyframes navbar-cue-out {
-	from { opacity: 1; }
-	to { opacity: 0; }
-}
-
-/* Compact ORDER. On the desktop the right-hand group is laid out with
-   `float: right`, which renders it in reverse source order -- so Switch, the
-   first of the group in the DOM, is the one nearest the logo. In compact the
-   float is off and source order wins, which put Switch dead last: the exact
-   reversal that sent it 726px off-screen. Only Switch actually moves here; the
-   rest keep the order they already had.
-
-   Every dropdown is listed. A new one added without an entry gets the initial
-   `order: 0`, which lands it in front of System where it is impossible to
-   miss -- and testenv/jstests/layout.test.mjs fails on it by name. */
-:root[data-ui="mobile"] ul#navbar > li#system-dropdown { order: 1; }
-:root[data-ui="mobile"] ul#navbar > li#switch-dropdown { order: 2; }
-:root[data-ui="mobile"] ul#navbar > li#atx-dropdown { order: 3; }
-:root[data-ui="mobile"] ul#navbar > li#msd-dropdown { order: 4; }
-:root[data-ui="mobile"] ul#navbar > li#macro-dropdown { order: 5; }
-:root[data-ui="mobile"] ul#navbar > li#text-dropdown { order: 6; }
-:root[data-ui="mobile"] ul#navbar > li#shortcuts-dropdown { order: 7; }
-:root[data-ui="mobile"] ul#navbar > li#gpio-dropdown { order: 8; }
-
-:root[data-ui="mobile"] ul#navbar li {
-	float: none;
-	flex: 0 0 auto;
-}
-
-/* Every item is sized for a fingertip, not for a mouse. The desktop's 14px
-   flanks and 10px gaps cost ~28px on EVERY item, and with a Switch attached
-   that is most of a screenful: the back-link alone was 138px, 35% of a 390px
-   phone, which is the single biggest reason ATX starts off-screen. Nothing is
-   removed -- the arrow, the mark and every dropdown all stay, just smaller.
-   The items keep their 50px height, so the touch target is unchanged. */
-:root[data-ui="mobile"] ul#navbar li .menu-item {
-	padding-left: 8px;
-	padding-right: 8px;
-	gap: 6px;
-}
-:root[data-ui="mobile"] ul#navbar li a.menu-item img.svg-gray {
-	height: 18px;
-}
-
-/* The labels and the status LEDs are both sized for a desktop. Trimming them
-   is what buys the remaining items their place: System alone carries four LEDs
-   and was the widest item on the strip at 209px. Nothing is dropped -- every
-   label and every LED is still there, which is the point: a bare icon strip
-   would be ambiguous (ATX and Switch carry the SAME two LEDs, and Shortcuts
-   and GPIO have no icon at all). */
-:root[data-ui="mobile"] ul#navbar li .menu-item {
-	font-size: 13px;
-	/* Trimming the label must not trim the target: "Text" came out 43px wide. */
-	min-width: 44px;
-	justify-content: center;
-}
-:root[data-ui="mobile"] ul#navbar li .menu-item img {
-	height: 16px;
-}
-
-/* Anchored dropdowns cannot work inside a scrolling container -- they would be
-   clipped by it. In compact the panel leaves the strip entirely and becomes a
-   bounded sheet with its own scroll. */
+/* An anchored dropdown is a desktop idea: in compact the panel leaves the bar
+   entirely and becomes a bounded sheet with its own scroll. */
 :root[data-ui="mobile"] ul#navbar li div.menu {
 	/* content-box plus a 2px border makes a full-width sheet 4px wider than the
 	   viewport, which is enough to push the page sideways. */
@@ -608,4 +455,152 @@ ul.navbar-bg-tips li a {
 
 :root[data-ui="mobile"] ul#navbar li div.menu td {
 	word-break: break-word;
+}
+
+
+/* =========================================================================
+   Compact: one button, and the sections behind it.
+
+   The strip that was here is gone. 📏 With a Switch attached it measured
+   815px on a 390px screen -- 425px of it (52%) past the right edge, 495px
+   (61%) at 320px -- and ATX, the fourth item, started at x=376. Scrolling it
+   was a real affordance and it was still the wrong shape: seven of nine items
+   were never seen, and a horizontal swipe is not something anyone tries on a
+   toolbar.
+
+   The bar keeps identity and status; every section moves into a grid that
+   opens beneath it. Nothing is hidden behind a ranking, nothing has to fit a
+   width budget, and the top of the screen goes back to being video.
+
+   Desktop is untouched: #navbar-sections is `display: contents` there, so the
+   dropdowns are laid out by the same rules that have always laid them out.
+   ========================================================================= */
+
+div#navbar-sections {
+	display: contents;
+}
+
+:root[data-ui="mobile"] ul#navbar {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: stretch;
+	padding-left: env(safe-area-inset-left);
+	padding-right: env(safe-area-inset-right);
+}
+
+/* Identity, status, then the button -- pushed to the far end, where a thumb
+   reaches it. */
+:root[data-ui="mobile"] ul#navbar > li#navbar-menu {
+	margin-left: auto;
+}
+
+:root[data-ui="mobile"] ul#navbar li#navbar-status .menu-item {
+	gap: 4px;
+	cursor: default;
+}
+
+:root[data-ui="mobile"] ul#navbar li {
+	float: none;
+	flex: 0 0 auto;
+}
+
+/* The sections themselves: a sheet of equal tiles under the bar. Three columns
+   is what fits a label like "Shortcuts" at 320px without shrinking the text. */
+:root[data-ui="mobile"] div#navbar-sections {
+	display: grid;
+	/* ul#navbar is position: fixed, so this hangs off the bar's real height --
+	   no number written down twice. */
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 100%;
+	z-index: 100;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 1px;
+	padding: 1px;
+	background-color: var(--cs-navbar-item-hovered-bg);
+	border-bottom: var(--border-navbar-menu-top-thin);
+	/* A percentage max-height resolves against the bar's height, so this is
+	   "the screen, less the bar". */
+	max-height: calc(100dvh - 100%);
+	overflow-y: auto;
+}
+
+/* Closed, the container is still THERE -- it just has nothing in it. Hiding the
+   container itself would hide the section sheets too, since every one of them
+   is a descendant of it and no amount of `position: fixed` escapes an ancestor
+   that is `display: none`: choosing System would have opened a sheet nobody
+   could see. So the TILES are what come and go. */
+:root[data-ui="mobile"] div#navbar-sections > li > .menu-item {
+	display: none;
+}
+
+:root[data-ui="mobile"] ul#navbar:not(.navbar-sections-open) div#navbar-sections {
+	background: none;
+	border: none;
+	padding: 0;
+	gap: 0;
+}
+
+/* Closed, each section contributes NO BOX: `display: contents` leaves its
+   trigger (hidden above) and its sheet (position: fixed, so it escapes) but
+   takes the li's own 50px away. Otherwise the container stays 100px tall over
+   the video -- invisible, and eating every tap that lands on it. */
+:root[data-ui="mobile"] ul#navbar:not(.navbar-sections-open) div#navbar-sections > li {
+	display: contents;
+}
+
+:root[data-ui="mobile"] ul#navbar.navbar-sections-open div#navbar-sections > li > .menu-item {
+	display: flex;
+}
+
+/* A tile is the section's own trigger. Same element, same handler, same menu:
+   only the shape around it changes. */
+:root[data-ui="mobile"] div#navbar-sections > li {
+	float: none;
+	display: block;
+	background-color: var(--cs-navbar-default-bg);
+}
+
+:root[data-ui="mobile"] div#navbar-sections > li > .menu-item {
+	/* `display` is the OPEN/CLOSED state and is set by the two rules above --
+	   setting it here as well would win on source order and the tiles would be
+	   on screen with the grid shut. */
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	height: 100%;
+	min-height: 60px;
+	padding: 8px 4px;
+	white-space: normal;
+	text-align: center;
+}
+
+/* Every item is sized for a fingertip, not for a mouse. */
+:root[data-ui="mobile"] ul#navbar li .menu-item {
+	padding-left: 8px;
+	padding-right: 8px;
+	gap: 6px;
+	font-size: 13px;
+	min-width: 44px;
+	justify-content: center;
+}
+:root[data-ui="mobile"] ul#navbar li a.menu-item img.svg-gray {
+	height: 18px;
+}
+:root[data-ui="mobile"] ul#navbar li .menu-item img {
+	height: 16px;
+}
+
+
+/* Compact-only tiles. #navbar-sections is display: contents on desktop, so
+   anything in it without this class is a desktop navbar item too. */
+li.navbar-compact-only {
+	display: none;
+}
+
+:root[data-ui="mobile"] div#navbar-sections > li.navbar-compact-only,
+:root[data-ui="mobile"] ul#navbar > li.navbar-compact-only {
+	display: block;
 }

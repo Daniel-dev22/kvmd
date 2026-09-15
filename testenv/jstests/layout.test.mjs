@@ -6,7 +6,7 @@
 import test, {before, after, describe} from "node:test";
 import assert from "node:assert/strict";
 import {serveWeb, launchBrowser, chromiumPath} from "./browser.mjs";
-import {PAGES} from "./helpers.mjs";
+import {PAGES, read} from "./helpers.mjs";
 
 // Narrowest supported phone, a common Android, a common iPhone, and a tablet
 // that must still get touch sizing without the phone layout.
@@ -538,4 +538,62 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.ok(box, "the keyboard window has no close button");
 		assert.ok(box.w > 0 && box.h > 0, `the close button is not visible: ${JSON.stringify(box)}`);
 	});
+});
+
+describe("the launcher offers everything it has on one row", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// The tiles are 100px wide with 5px margins and float: left, so three of
+	// them need 330px: on a phone KVM and Terminal took the first row and
+	// Logout wrapped onto a second. The apps come from the API, which is not
+	// behind this page, so the list is stood in -- in the shape index/main.js
+	// actually builds, which is asserted against the source below.
+	const APPS = `(() => {
+		const tile = (id, path, icon, name) => \`<li>
+			<div \${id ? 'id="' + id + '"' : ""} class="app">
+				<a href="\${path}/">
+					<div><img class="svg-gray" src="\${icon}">\${name}</div>
+				</a>
+			</div>
+		</li>\`;
+		document.getElementById("apps-box").innerHTML = "<ul id=\\"apps\\">"
+			+ tile(null, "kvm", "share/svg/kvm.svg", "KVM")
+			+ tile(null, "webterm", "share/svg/webterm.svg", "Terminal")
+			+ tile("logout-button", "#", "share/svg/logout.svg", "Logout")
+			+ "</ul>";
+		return true;
+	})()`;
+
+	test("index/main.js still builds the tiles this test stands in for", () => {
+		const src = read("web/share/js/index/main.js");
+		for (const marker of ["<ul id=\"apps\">", "<li>", "class=\"app\"", "<img class=\"svg-gray\""]) {
+			assert.ok(src.includes(marker),
+				`index/main.js no longer builds ${marker}: this suite is measuring a shape the app stopped producing`);
+		}
+	});
+
+	for (const width of [320, 390]) {
+		test(`three apps share one row at ${width}px`, async () => {
+			const pg = await open("web/index.html", width);
+			await pg.eval(APPS);
+			const m = await pg.eval(`(() => {
+				const tiles = [...document.querySelectorAll("#apps li")].map(function(li) {
+					const r = li.getBoundingClientRect();
+					const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+					return {
+						"name": li.textContent.trim(),
+						"y": Math.round(r.top), "w": Math.round(r.width),
+						"tappable": (li.contains(top)),
+					};
+				});
+				return {tiles, "rows": [...new Set(tiles.map((t) => t.y))].length};
+			})()`);
+			await pg.close();
+			assert.equal(m.tiles.length, 3, "the stand-in list did not render");
+			assert.equal(m.rows, 1,
+				`the launcher split its apps over ${m.rows} rows at ${width}px: ${JSON.stringify(m.tiles)}`);
+			for (const tile of m.tiles) {
+				assert.ok(tile.w >= MIN_TARGET, `${tile.name} is ${tile.w}px wide at ${width}px`);
+				assert.equal(tile.tappable, true, `${tile.name} is covered by something else`);
+			}
+		});
+	}
 });
