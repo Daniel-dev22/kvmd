@@ -42,7 +42,9 @@ test("non-ASCII is carried through untouched", () => {
 // ---- the padding ----
 
 test("the padding is invisible and is not content", () => {
-	assert.equal(PAD.length > 0, true, "an empty field reports no deletion on Android");
+	// Not just non-empty: a run of one would lean constantly on the InputEvent
+	// intent fallback, which is the half of the mechanism some engines omit.
+	assert.ok(PAD.length >= 4, `the padding is margin as well as mechanism, got ${PAD.length}`);
 	assert.equal(stripPad(PAD), "");
 	assert.equal(stripPad(PAD + "ls -la"), "ls -la");
 	// Wherever it sits: an IME may insert in front of the caret.
@@ -375,12 +377,12 @@ test("the keymap is resolved per request, not captured once", () => {
 
 // ---- wiring ----
 
-test("typing reuses the server keymap instead of mapping in the browser", () => {
-	const kb = read("web/share/js/kvm/keyboard.js");
-	assert.match(kb, /printText\(/, "the typing bar must go through api/hid/print");
-	assert.match(kb, /hid-pak-keymap-selector/,
-		"it must reuse the Text menu's keymap chooser rather than offering a second one");
-	// A scancode table in the browser would be a second copy of every keymap.
+test("no keymap is reimplemented in the browser", () => {
+	// What the bar does with the keymap is asserted for real in ime.test.mjs
+	// ("the keymap on the request is the one the selector holds"): a source
+	// match let a build that hardcoded "en-us" pass. What remains here is the
+	// property no behavioural test can express -- that a mapping table does not
+	// exist anywhere, which is an assertion about ABSENCE across every file.
 	for (const f of jsFiles()) {
 		assert.doesNotMatch(read(f), /SHIFTED_CHARS|CHAR_TO_SCANCODE|charToKey/,
 			`${f}: character-to-scancode mapping belongs on the server`);
@@ -395,8 +397,9 @@ test("composition gates the field reset, never the sending", () => {
 	const listener = kb.slice(kb.indexOf(`el.addEventListener("input"`), kb.indexOf(`el.addEventListener("keydown"`));
 	assert.doesNotMatch(listener, /__composing/,
 		"the input handler must not consult composition state: every composed character goes to the host");
-	assert.match(kb, /if \(__composing\) \{\n\t{4}\t*return; \/\/ The IME still owns the field/,
-		"the reset is what composition gates");
+	// The reset's own timing is asserted behaviourally in ime.test.mjs ("the
+	// field is not reset under an edit that is still being delivered") -- a
+	// match on this comment survived making the reset synchronous.
 });
 
 test("a chord is not the bar's to handle", () => {
@@ -414,20 +417,9 @@ test("a press and its release are classified together", () => {
 	// the bar, let go -- and classifying each by where it lands sends the press
 	// and eats the release, leaving that key held down on the host forever.
 	const kb = read("web/share/js/kvm/keyboard.js");
-	assert.match(kb, /__bar_keys/, "the press's decision has to be remembered for the release");
 	const fn = kb.slice(kb.indexOf("var __isTypingBarKey"), kb.indexOf("var __keyboardHandler"));
 	assert.match(fn, /if \(!state\) \{\s*\n\s*return __bar_keys\.delete\(ev\.code\);/,
 		"a release must follow its own press, not the current focus");
-});
-
-test("composition state has a reset path that is not compositionend", () => {
-	// An Android tab frozen mid-word never fires compositionend, which left
-	// __composing latched and every later reset skipped -- the field back to
-	// being the accumulating transcript this phase set out to delete.
-	const kb = read("web/share/js/kvm/keyboard.js");
-	const clear = kb.slice(kb.indexOf("var __clearField"), kb.indexOf("var __onEdit"));
-	assert.match(clear, /__composing = false/, "blur must clear composition state");
-	assert.match(clear, /__bar_keys\.clear\(\)/, "blur must not leave a swallowed press unmatched");
 });
 
 test("the typing field cannot trigger iOS focus zoom", () => {

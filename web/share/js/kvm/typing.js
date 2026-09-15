@@ -39,9 +39,12 @@
 // bug this padding exists to stop. Zero-width spaces are invisible, take no
 // room, and are stripped out of everything on its way to the host.
 //
-// Eight of them, because a delete gesture can eat a whole run in ONE event and
-// the field is only put back on the next task. Nothing depends on the length:
-// a deletion that outruns the padding still decodes as a deletion.
+// Eight of them is MARGIN, not correctness: a delete gesture can eat a whole
+// run in one event and the field is only put back on the next task. Correctness
+// does not depend on the length -- a deletion that outruns the padding entirely
+// is still decoded, from the InputEvent's own intent -- but a run of one would
+// lean on that fallback constantly, and it is the half of the mechanism that
+// some engines do not report.
 export const PAD = "​".repeat(8);
 
 const ZWSP = "\u200b";

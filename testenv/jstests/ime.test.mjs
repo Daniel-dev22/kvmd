@@ -395,6 +395,30 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		assert.equal(typed(host), "aaa", `a muted HID received: ${JSON.stringify(host)}`);
 	});
 
+	test("a composition that never ends does not latch the field open", async () => {
+		// 📏 Disabling __clearField's reset of __composing survived: both
+		// assertions on it matched the SOURCE TEXT, which the mutation left
+		// alone. An Android tab frozen mid-word never fires compositionend, so
+		// __composing latched, every later reset was skipped, and the field
+		// went back to being the accumulating transcript this phase deleted.
+		// Chrome always fires compositionend, so the only way to reach it is to
+		// start a composition that never finishes.
+		const pg = await openTyping();
+		await pg.eval(`${FIELD}.dispatchEvent(new CompositionEvent("compositionstart", {bubbles: true}))`);
+		await pg.eval(`${FIELD}.blur()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		await pg.eval(`${FIELD}.focus()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 100))");
+		await pg.eval(`(() => { const el = ${FIELD};
+			el.value = el.value + "zz";
+			el.dispatchEvent(new Event("input", {bubbles: true}));
+			return true; })()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
+		const left = await pg.eval(`${FIELD}.value.replace(/\u200b/gu, "")`);
+		await pg.close();
+		assert.equal(left, "", `the field latched open and kept a transcript: ${JSON.stringify(left)}`);
+	});
+
 	test("the field never accumulates a transcript", async () => {
 		// There is no feedback channel from the host, so a field that kept what
 		// was typed would disagree with the console the moment anything else
