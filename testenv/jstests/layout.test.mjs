@@ -210,7 +210,7 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.deepEqual(blocked, [], `mouse buttons covered: ${JSON.stringify(blocked)}`);
 	});
 
-	test("while typing, the strip is ONE scrollable row and the console gets the height", async () => {
+	test("while typing, the strip is ONE row that FITS, and the console gets the height", async () => {
 		// 📏 Measured at 390x420 -- a phone with the system keyboard up, which
 		// is the only time this matters. Three rows of keys (layer picker,
 		// modifiers, arrows) made the sheet 269px, 64% of the screen, and left
@@ -236,7 +236,11 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		})()`);
 		const m = await pg.eval(`(() => {
 			const strips = document.querySelector(".keypad-strips");
-			const keys = [...strips.querySelectorAll(".key")];
+			// Only the keys actually on screen: the three that keep their place
+			// on the board are display:none here, and a hidden element reports
+			// top 0, which reads as a second row.
+			const keys = [...strips.querySelectorAll(".key")]
+				.filter((k) => k.getBoundingClientRect().height > 0);
 			const r = strips.getBoundingClientRect();
 			const win = document.getElementById("keyboard-window").getBoundingClientRect();
 			const box = document.getElementById("stream-box").getBoundingClientRect();
@@ -260,21 +264,29 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 
 		assert.equal(m.typing, "1", "precondition: the compact keyboard opens in typing mode");
 		assert.equal(m.tops.length, 1, `the strip must be ONE row, found tops ${JSON.stringify(m.tops)}`);
-		assert.ok(m.scrollW > m.clientW,
-			`the strip must scroll, not be cut off: ${m.scrollW} content in ${m.clientW}`);
+		// 🔴 It must FIT, not scroll. Every key binds touchstart through
+		// setOnDown, which preventDefaults (events.js:44), so the browser's pan
+		// never starts and a scroller here cannot be scrolled by a finger at
+		// all. 📏 Measured against the scrolling version: a 120px drag moved
+		// scrollLeft by 0 and sent `Escape` to the host, because the gesture
+		// reads as a press on whichever key it began on. A swipe that types is
+		// worse on a KVM than a row that does not scroll.
+		assert.ok(m.scrollW <= m.clientW + 1,
+			`the strip overflows by ${m.scrollW - m.clientW}px and cannot be scrolled to reach it`);
 		// Every key still a finger-sized target -- the height came from losing
 		// two ROWS, never from shrinking the keys.
 		assert.ok(m.minKeyH >= 44, `keys shrank to ${m.minKeyH}px tall`);
 		assert.ok(m.minKeyW >= 44, `keys shrank to ${m.minKeyW}px wide`);
-		// What fits without scrolling is the console's own set. Alt, Shift and
-		// Win scroll: a shell needs the arrows and Ctrl far more often.
-		for (const code of ["ArrowLeft", "ArrowDown", "ArrowUp", "ArrowRight", "ControlLeft", "Escape"]) {
-			assert.ok(m.reachableWithoutScrolling.includes(code),
-				`${code} needs scrolling to reach; visible: ${JSON.stringify(m.reachableWithoutScrolling)}`);
-		}
-		assert.equal(m.all.length, 10, "all ten strip keys must still be there, just scrolled");
+		// The row carries what a console needs: the four arrows, Ctrl, Esc and
+		// Tab. Alt, Shift and Win keep their place on the board, which the
+		// typing bar's button reaches in one tap.
+		assert.deepEqual(m.all.sort(), [
+			"ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "ControlLeft", "Escape", "Tab",
+		].sort(), `the row carries: ${JSON.stringify(m.all)}`);
+		assert.equal(m.reachableWithoutScrolling.length, m.all.length,
+			`${m.all.length - m.reachableWithoutScrolling.length} keys are off the edge and unreachable`);
 		assert.ok(m.sheet <= 185, `the sheet is ${m.sheet}px; three rows of keys was 269px`);
-		assert.ok(m.console >= 150, `only ${m.console}px of console visible; three rows left 62px`);
+		assert.ok(m.console >= 155, `only ${m.console}px of console visible; three rows left 62px`);
 	});
 
 	test("every visible key and layer button is touchable", async () => {

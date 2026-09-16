@@ -282,37 +282,46 @@ div.keypad-strips {
 	display: contents;
 }
 
-/* While the system keyboard is up, the two strip rows become ONE horizontally
-   scrollable row. 📏 Three rows of keys above the system keyboard left 62px of
-   the console visible at 390x420 -- the sheet was 64% of the screen.
-   The keys keep their 46px touch target and simply run off the right. */
+/* While the system keyboard is up, the two strip rows become ONE row. 📏 Three
+   rows of keys above the system keyboard left 62px of the console visible at
+   390x420 -- the sheet was 64% of the screen. One row leaves ~162px.
+
+   🔴 It must FIT. An earlier version made this a horizontal scroller, and it
+   could not be scrolled by a finger at all: every key binds touchstart through
+   setOnDown, which preventDefaults (events.js:44), so the browser's pan never
+   starts. Measured -- a 120px drag moved scrollLeft by 0 and sent `Escape` to
+   the host, because the gesture reads as a press on whichever key it began on.
+   On a KVM a swipe that types is worse than a row that does not scroll.
+
+   So the row carries what a console needs and nothing else: the four arrows,
+   Ctrl, Esc and Tab, sharing the width evenly at ~50px. Alt, Shift and Win keep
+   their place on the board, one tap away on the button in the typing bar. */
 :root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips {
 	display: flex;
 	gap: 3px;
-	overflow-x: auto;
-	overscroll-behavior-x: contain;
-	scrollbar-width: none;
-	padding-top: 6px;
-	border-top: var(--border-menu-item-content-top-thin);
-	/* So it reads as scrollable rather than as a row that has been cut off. */
-	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-	mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
-:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips::-webkit-scrollbar {
-	display: none;
-}
-
-/* The rows stop being boxes so their keys become items of the one scroller. */
+/* The rows stop being boxes so their keys become items of the one row. */
 :root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strip {
 	display: contents;
 }
 
-/* Out of the 20-column grid and onto a fixed width: the grid spans are for a
-   row that fits, and these deliberately do not. */
+/* Out of the 20-column grid and onto an even share of the row: the grid spans
+   are for two rows that each fill the width on their own. */
 :root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips div.key {
-	flex: 0 0 auto;
-	width: 46px;
+	flex: 1 1 0;
+	min-width: 44px;
+}
+
+/* Reachable on the board, which the typing bar's button reaches in one tap.
+   Keeping them here instead would put ten keys in a row that fits seven, and
+   the three that fell off the edge would be unreachable rather than merely
+   further away -- Phase 6 measured that on the navbar: seven of nine items
+   never seen. */
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips div.key[data-keypad-code="AltLeft"],
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips div.key[data-keypad-code="ShiftLeft"],
+:root[data-ui="mobile"][data-typing="1"] div.keypad div.keypad-strips div.key[data-keypad-code="MetaLeft"] {
+	display: none;
 }
 
 /* The picker is a whole row whose only job while typing is "give me the board
