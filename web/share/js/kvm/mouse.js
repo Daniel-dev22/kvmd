@@ -293,9 +293,15 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchStartHandler = function(ev) {
-		// Any touch on the video means the user is working there -- with one
-		// finger that IS the host's pointer, and moving the view under it moves
-		// what the finger maps to.
+		// Hold the follower off for the duration of the gesture: with one finger
+		// the video IS the host's pointer, and panning under a drag moves what
+		// that finger maps to, so the host's pointer jumps mid-drag.
+		//
+		// At touchstart a tap and a drag are indistinguishable, so this assumes
+		// the worst. __touchClick lifts it again the moment the gesture turns
+		// out to have been a tap -- a tap moves nothing, and making one cost
+		// four seconds of standing still is the follower getting in the way of
+		// the thing it exists to help.
 		__follow_manual_ts = Date.now();
 		// One finger is ours: preventDefault stops the page panning under it and
 		// stops the browser replaying the whole gesture as mouse events. TWO is
@@ -633,6 +639,14 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __touchClick = function(button) {
+		// This gesture turned out to be a tap (or a long press), not a drag --
+		// it moved nothing, so the reason the follower stood down at touchstart
+		// never materialised. Released here rather than on touchend because
+		// this is where "it was a tap" is already decided; deciding it twice is
+		// how two definitions of a tap drift apart. Before the latch check
+		// below, which returns early but is still a tap.
+		__follow_manual_ts = 0;
+
 		// A tap is a click on the host. In absolute mode the cursor is already
 		// under the finger; in relative mode this is a trackpad, and the click
 		// lands where the host's own cursor is.

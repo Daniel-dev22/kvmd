@@ -350,6 +350,99 @@ describe("the view follows the action", {"skip": chromiumPath() ? false : "no ch
 			+ `(y ${caret.y.toFixed(1)}, band ${want.toFixed(1)}, box ${caret.h})`);
 	});
 
+	// A page with the follower running over a picture we can change, zoomed in,
+	// with the opening hold already waited out.
+	async function openFollowing() {
+		const pg = await browser.newPage();
+		await pg.setViewport(390, 844, true);
+		await pg.setTouch(true, 5);
+		await pg.clearStorage(server.origin);
+		await pg.goto(`${server.origin}/kvm/index.html`);
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		await pg.eval(`(() => {
+			const c = document.getElementById("stream-canvas");
+			c.width = 2560; c.height = 1080;
+			c.classList.remove("hidden");
+			document.getElementById("stream-image").classList.add("hidden");
+			window.__paint = function(n) {
+				const x = c.getContext("2d");
+				x.fillStyle = "#000"; x.fillRect(0, 0, 2560, 1080);
+				if (n % 2 === 0) { x.fillStyle = "#fff"; x.fillRect(512, 745, 10, 20); }
+			};
+			window.__paint(1);
+			const el = document.getElementById("stream-zoom-slider");
+			el.value = "2.5";
+			el.dispatchEvent(new Event("change", {bubbles: true}));
+			return true;
+		})()`);
+		// An explicit zoom is a deliberate choice of view, so the follower
+		// stands down for it. Wait that out before asking anything.
+		await pg.eval("new Promise((r) => setTimeout(r, 4200))");
+		return pg;
+	}
+
+	// Doubled: this lives inside a template literal, which eats one level of
+	// escaping before the page sees the regex. 📏 Written singly it becomes a
+	// capturing group and an `s`, matches nothing, and reads 0 forever -- which
+	// made the tap test below fail and its drag control PASS, both for the same
+	// wrong reason. An unparseable transform is null, never 0.
+	const TY = `(() => {
+		const el = document.getElementById("stream-canvas");
+		if (!el.style.transform) { return 0; }   // genuinely un-panned
+		const m = /translate\\(([-0-9.]+)px,\\s*([-0-9.]+)px\\)/.exec(el.style.transform);
+		return (m === null ? null : parseFloat(m[2]));
+	})()`;
+
+	// Blinks the caret for `ms` and reports whether the view ever moved.
+	async function movedWithin(pg, ms) {
+		const until = Date.now() + ms;
+		for (let n = 0; Date.now() < until; n += 1) {
+			await pg.eval(`window.__paint(${n})`);
+			await pg.eval("new Promise((r) => setTimeout(r, 200))");
+			const y = await pg.eval(TY);
+			assert.notEqual(y, null, "could not read the transform -- this instrument reads nothing");
+			if (y < -1) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const boxCentre = `(() => { const b = document.getElementById("stream-box").getBoundingClientRect();
+		return {"x": b.left + b.width / 2, "y": b.top + b.height / 2}; })()`;
+
+	test("a tap on the video does not cost four seconds of standing still", async () => {
+		// The follower stands down on touchstart because a tap and a drag are
+		// indistinguishable there. Only a DRAG can move what the finger maps
+		// to; a tap moves nothing, so making one cost a four-second hold is the
+		// follower getting in the way of the thing it exists to help.
+		const pg = await openFollowing();
+		const at = await pg.eval(boxCentre);
+		await pg.touch("touchStart", [at]);
+		await pg.touch("touchEnd", []);
+		const moved = await movedWithin(pg, 2000);
+		await pg.close();
+		assert.ok(moved, "the follower was still standing down two seconds after a tap");
+	});
+
+	test("a drag on the video DOES hold the follower off", async () => {
+		// The negative control, and the reason the hold exists: with one finger
+		// the video is the host's pointer, and panning under a drag moves what
+		// that finger maps to -- the host's pointer jumps mid-drag and the
+		// selection lands somewhere the user never went.
+		const pg = await openFollowing();
+		const at = await pg.eval(boxCentre);
+		await pg.touch("touchStart", [at]);
+		for (let i = 1; i <= 5; i += 1) {
+			await pg.touch("touchMove", [{"x": at.x, "y": at.y - i * 12}]);
+			await pg.eval("new Promise((r) => setTimeout(r, 20))");
+		}
+		await pg.touch("touchEnd", []);
+		const moved = await movedWithin(pg, 2000);
+		await pg.close();
+		assert.equal(moved, false, "the follower moved the view under a drag that had just finished");
+	});
+
 	// This is also the negative control for the test above: if the view moved
 	// for some reason other than the follower, it would move here too.
 	test("the switch turns it off", async () => {
