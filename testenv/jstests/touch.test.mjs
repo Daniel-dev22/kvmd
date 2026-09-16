@@ -201,6 +201,11 @@ describe("a finger reaches every modifier state", {"skip": chromiumPath() ? fals
 		// one of them is how the two hand-written boards used to drift.
 		const pg = await open();
 		await pg.eval(SHOW_KEYBOARD);
+		// The keyboard opens in TYPING mode, where the strip carries only what
+		// a console needs and Shift lives on the board. Ask for the board the
+		// way a user does.
+		await pg.eval(`document.getElementById("hid-type-board").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
 		await tap(pg, await pg.eval(centre(`#keyboard-compact [data-keypad-code="ShiftLeft"]`)));
 		const desktop = await pg.eval(classOf(`#keyboard-desktop [data-keypad-code="ShiftLeft"]`));
 		await pg.close();

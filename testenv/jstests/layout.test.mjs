@@ -562,7 +562,11 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		const opened = await pg.eval(snap);
 		assert.equal(opened.typing, "1", "the compact keyboard must open in typing mode");
 		assert.equal(opened.rows, 0, "the redundant scancode layers must not be on screen while the phone's own keyboard is");
-		assert.ok(opened.strip >= 10, `only ${opened.strip} strip keys -- the arrows and modifiers a phone cannot send must stay`);
+		// Seven: the four arrows, Ctrl, Esc and Tab. Alt, Shift and Win keep
+		// their place on the board -- a row that fits seven cannot carry ten,
+		// and the three past the edge would be unreachable, not just further
+		// away, because the strip cannot be scrolled by a finger at all.
+		assert.equal(opened.strip, 7, `${opened.strip} strip keys -- the console's own set must be on screen`);
 		assert.equal(opened.bar, 1, "the typing bar must be on screen");
 		// The picker is a whole row whose only job here is "give me the board
 		// back", and that is one button -- which sits in the typing bar, where

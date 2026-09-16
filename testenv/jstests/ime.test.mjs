@@ -304,8 +304,14 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		// failure as success survived, with the orphaned Enter this phase names
 		// as its worst case live again.
 		const pg = await openTyping();
+		// Slow AND broken: the Enter has to be queued while the print is still
+		// in flight. 📏 With an instant failure this test was a coin flip --
+		// the queue is aborted and empty before the Enter is pressed, so it
+		// goes out alone, which is a different question from the one here.
+		server.control.printDelayMs = 400;
 		server.control.printStatus = 500;
 		await pg.commit("rm -rf /tmp/x");
+		await pg.eval("new Promise((r) => setTimeout(r, 80))");
 		await pg.key("Enter", "Enter", 13);
 		const failed = await waitFor(pg, `${FIELD}.hasAttribute("data-failed")`);
 		const host = await hostSettled(pg, 0, 800);
