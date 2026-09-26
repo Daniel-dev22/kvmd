@@ -11,6 +11,12 @@
 	.window-header#stream-window-header
 		.window-grab MJPEG
 		.window-buttons
+			//- Compact only. Zoomed to 250% you see a quarter of the console,
+			//- and getting back to a part you cannot see means zooming out,
+			//- dragging, and zooming in again -- having lost where you were.
+			//- This shows the whole screen on one tap and RESTORES the exact
+			//- view on the next, so looking somewhere else costs nothing.
+			button#stream-fit-button(type="button" title="Fit the whole console, and back")
 			button(data-wm-window-set-full-screen)
 			button(data-wm-window-set-full-tab)
 			button(data-wm-window-set-original)

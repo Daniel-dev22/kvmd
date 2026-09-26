@@ -289,6 +289,65 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.ok(m.console >= 155, `only ${m.console}px of console visible; three rows left 62px`);
 	});
 
+	test("fit shows the whole console and puts you back exactly where you were", async () => {
+		// 🔴 Deferred in Phase 6 as "the console zoom has no reset control", on
+		// the grounds that "pinching back out reaches 100%... a fit button is
+		// product surface nobody has asked for". Both halves were true and the
+		// conclusion was wrong: nothing being unreachable is not the same as it
+		// being reachable CHEAPLY, and the cost is paid every time. Reported
+		// from the device as "we zoom in for mobile [so] we could end up at the
+		// top or bottom and need to zoom out and drag which is weird ux".
+		//
+		// RESTORING the previous view is the whole point -- zooming back in by
+		// hand lands somewhere else, which is the part that made it weird.
+		const pg = await open("web/kvm/index.html", 390, 700, true, true);
+		await pg.eval("new Promise((r) => setTimeout(r, 300))");
+		const T = `document.getElementById("stream-image").style.transform || "none"`;
+		const fit = await pg.eval(`(() => {
+			const b = document.getElementById("stream-fit-button").getBoundingClientRect();
+			return {"w": Math.round(b.width), "h": Math.round(b.height)};
+		})()`);
+		// 40, not 44: every window-header button in compact is 40px tall, and
+		// that is pre-existing -- Close and the keyboard toggle included. 📏 It
+		// is under both the 44pt (Apple) and 48dp (Material) minimums and is
+		// recorded as such; raising it grows every window header, which is the
+		// change that put keys under the header in Phase 6, so it is not being
+		// done as a side effect of adding a button.
+		assert.ok(fit.w >= 40 && fit.h >= 40, `the fit control is ${fit.w}x${fit.h}`);
+
+		// Look somewhere that is not where the view starts.
+		await pg.eval(`(() => {
+			const b = document.getElementById("stream-box").getBoundingClientRect();
+			window.__p = {"x": b.left + b.width / 2, "y": b.top + b.height / 2};
+			return true;
+		})()`);
+		const p = await pg.eval("window.__p");
+		await pg.touch("touchStart", [{"x": p.x - 40, "y": p.y + 60}, {"x": p.x + 40, "y": p.y + 60}]);
+		for (let i = 1; i <= 5; i += 1) {
+			await pg.touch("touchMove", [
+				{"x": p.x - 40, "y": p.y + 60 - i * 18}, {"x": p.x + 40, "y": p.y + 60 - i * 18}]);
+			await pg.eval("new Promise((r) => setTimeout(r, 25))");
+		}
+		await pg.touch("touchEnd", []);
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
+		const looking_at = await pg.eval(T);
+		assert.match(looking_at, /scale\(/, "precondition: the console starts zoomed");
+		assert.notEqual(looking_at, "translate(0px, 0px) scale(2.5)", "precondition: the view was moved");
+
+		await pg.eval(`document.getElementById("stream-fit-button").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		const fitted = await pg.eval(T);
+		assert.ok(fitted === "none" || /scale\(1\)/.test(fitted),
+			`fit must show the WHOLE console, got ${fitted}`);
+
+		await pg.eval(`document.getElementById("stream-fit-button").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		const restored = await pg.eval(T);
+		await pg.close();
+		assert.equal(restored, looking_at,
+			`fit must put you back where you were, not merely zoomed in again: ${restored}`);
+	});
+
 	test("every docked window can be closed again", async () => {
 		// 🔴 Reported from the device: "there is no way to close mouse on mobile
 		// when it opens". The mouse window's close button was display:none in

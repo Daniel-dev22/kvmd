@@ -189,6 +189,17 @@ canvas#stream-canvas {
    something suppresses the very action that would falsify it. What it left
    behind was reported from the device as "there is no way to close mouse on
    mobile when it opens". */
+/* The fit toggle is a compact affordance: on the desktop the whole console is
+   already on screen and there is nothing to fit. */
+:root[data-ui="desktop"] button#stream-fit-button {
+	display: none;
+}
+
+:root[data-ui="mobile"] button#stream-fit-button::after {
+	content: "\\2922";   /* ⤢ */
+	font-size: 18px;
+}
+
 :root[data-ui="mobile"] button#navbar-show-button {
 	display: none;
 }

@@ -163,6 +163,8 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		// and a gesture the user never finished would be read as a tap.
 		$("stream-box").addEventListener("touchcancel", __streamTouchCancelHandler);
 
+		tools.el.setOnClick($("stream-fit-button"), __toggleFit);
+
 		tools.storage.bindSimpleSwitch($("hid-mouse-tap-click-switch"), "hid.mouse.tap_click", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-squash-switch"), "hid.mouse.squash", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-y-switch"), "hid.mouse.reverse_scrolling", false);
@@ -358,6 +360,8 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	var __follow_el = null;
 	var __follow_timer = null;
 	var __follow_manual_ts = 0;
+	// The view a fit was taken from, so the next tap can put it back exactly.
+	var __fit_from = null;
 	var __follow_broken = false;
 
 	// The one stream element actually on screen. Which of the three it is
@@ -386,6 +390,42 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	// bitmap from this element, so this is the only source that cannot
 	// disagree with what was sampled -- and it answers before the streamer has
 	// reported a resolution at all, which is most of a page's first seconds.
+	// Show the whole console, or go back to exactly where you were looking.
+	//
+	// 🔴 Deferred in Phase 6 as "the console zoom has no reset control", on the
+	// grounds that "pinching back out reaches 100% and the slider sets any
+	// value, so nothing is unreachable" and "a fit button is product surface
+	// nobody has asked for". Both halves were true and the conclusion was
+	// wrong: nothing being unreachable is not the same as it being reachable
+	// CHEAPLY, and the cost is paid every time. Reported from the device as
+	// "we zoom in for mobile [so] we could end up at the top or bottom and
+	// need to zoom out and drag which is weird ux".
+	//
+	// Restoring the previous view is the whole point. Zooming back in by hand
+	// lands somewhere else, which is the part that made it weird.
+	var __toggleFit = function() {
+		let box = $("stream-box").getBoundingClientRect();
+		if (box.width === 0 || box.height === 0) {
+			return;
+		}
+		__zoom.setViewport(box.width, box.height);
+		if (__zoom.isZoomed()) {
+			__fit_from = __zoom.get();
+			__zoom.reset();
+		} else if (__fit_from !== null) {
+			__zoom.reset();
+			__zoom.pinch(__fit_from.scale, {"x": 0, "y": 0});
+			__zoom.pan(__fit_from.x - __zoom.get().x, __fit_from.y - __zoom.get().y);
+			__fit_from = null;
+		} else {
+			// Never fitted from anywhere -- fall back to the configured zoom.
+			__zoom.pinch(Number($("stream-zoom-slider").value), {"x": 0, "y": 0});
+		}
+		__applyZoom();
+		// A deliberate choice of view; the follower does not get to argue.
+		__follow_manual_ts = Date.now();
+	};
+
 	var __followPicture = function(el, box) {
 		let nw = (el.naturalWidth || el.videoWidth || el.width || 0);
 		let nh = (el.naturalHeight || el.videoHeight || el.height || 0);

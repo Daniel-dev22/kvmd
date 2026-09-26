@@ -573,8 +573,17 @@ describe("the sections are a grid behind one button", {"skip": chromiumPath() ? 
 		// opened where nobody can see it -- which is the defect this guards.
 		const m = await pg.eval(`(async () => {
 			const el = document.getElementById("system-menu");
-			for (let i = 0; i < 40; i++) {
-				if (el.getBoundingClientRect().height > 100) { break; }
+			const bar = document.getElementById("navbar");
+			// BOTH conditions, not just the sheet. wm.js closes the grid from a
+			// deferred handler (setTimeout, so a touchend on Chrome is not lost
+			// to the menu closing under it), so under load the sheet is open
+			// and the grid has not closed YET -- which reads exactly like the
+			// grid staying open behind it, the defect this guards. 📏 That is
+			// the ~1-in-3 full-suite failure this test had, and the one three
+			// orphaned runs had hung in.
+			for (let i = 0; i < 60; i++) {
+				if (el.getBoundingClientRect().height > 100
+					&& !bar.classList.contains("navbar-sections-open")) { break; }
 				await new Promise((done) => setTimeout(done, 50));
 			}
 			const sheet = el.getBoundingClientRect();
