@@ -195,9 +195,14 @@ canvas#stream-canvas {
 	display: none;
 }
 
-:root[data-ui="mobile"] button#stream-fit-button::after {
-	content: "\\2922";   /* ⤢ */
-	font-size: 18px;
+:root[data-ui="mobile"] button#stream-fit-button {
+	/* A WORD, not a glyph. ⤢ was tried and it reads as zoom or full screen --
+	   which is exactly what the two buttons beside it already do, and the
+	   opposite of what this one does. The label also carries the toggle's
+	   state, which no icon here could. */
+	line-height: 1;
+	font-size: 11px;
+	letter-spacing: 0.2px;
 }
 
 :root[data-ui="mobile"] button#navbar-show-button {

@@ -304,8 +304,14 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		await pg.eval("new Promise((r) => setTimeout(r, 300))");
 		const T = `document.getElementById("stream-image").style.transform || "none"`;
 		const fit = await pg.eval(`(() => {
-			const b = document.getElementById("stream-fit-button").getBoundingClientRect();
-			return {"w": Math.round(b.width), "h": Math.round(b.height)};
+			const el = document.getElementById("stream-fit-button");
+			const b = el.getBoundingClientRect();
+			const after = getComputedStyle(el, "::after").content;
+			return {
+				"w": Math.round(b.width), "h": Math.round(b.height),
+				"label": (el.textContent || "").trim(),
+				"after": after,
+			};
 		})()`);
 		// 40, not 44: every window-header button in compact is 40px tall, and
 		// that is pre-existing -- Close and the keyboard toggle included. 📏 It
@@ -314,6 +320,13 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		// change that put keys under the header in Phase 6, so it is not being
 		// done as a side effect of adding a button.
 		assert.ok(fit.w >= 40 && fit.h >= 40, `the fit control is ${fit.w}x${fit.h}`);
+		// 🔴 It has to SAY something. A CSS content escape written with one
+		// backslash too many renders as the literal text "\\2922" on the
+		// button, and the test that measured the button's SIZE could not see
+		// it -- it shipped, and was reported from the device as "on console
+		// view what is \\2922". Assert the label, and that it is not an
+		// escape that failed to resolve.
+		assert.match(fit.label, /^(Fit|Back)$/, `the fit control reads ${JSON.stringify(fit.label)}`);
 
 		// Look somewhere that is not where the view starts.
 		await pg.eval(`(() => {
@@ -337,6 +350,8 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		await pg.eval(`document.getElementById("stream-fit-button").click()`);
 		await pg.eval("new Promise((r) => setTimeout(r, 250))");
 		const fitted = await pg.eval(T);
+		assert.equal(await pg.eval(`document.getElementById("stream-fit-button").textContent.trim()`),
+			"Back", "the label must say which way the toggle goes next");
 		assert.ok(fitted === "none" || /scale\(1\)/.test(fitted),
 			`fit must show the WHOLE console, got ${fitted}`);
 

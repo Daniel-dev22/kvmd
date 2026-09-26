@@ -96,6 +96,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		tools.storage.bindSimpleSlider($("stream-zoom-slider"), "stream.zoom", ZOOM_MIN, ZOOM_MAX, 0.25, ZOOM_COMPACT_DEFAULT, function(value) {
 			$("stream-zoom-value").innerText = `${Math.round(value * 100)}%`;
 			__resetZoom(value);
+			__syncFitLabel();
 		});
 
 		tools.storage.bindSimpleSwitch($("stream-follow-switch"), "stream.follow", true, function(value) {
@@ -164,6 +165,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		$("stream-box").addEventListener("touchcancel", __streamTouchCancelHandler);
 
 		tools.el.setOnClick($("stream-fit-button"), __toggleFit);
+		__syncFitLabel();
 
 		tools.storage.bindSimpleSwitch($("hid-mouse-tap-click-switch"), "hid.mouse.tap_click", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-squash-switch"), "hid.mouse.squash", true);
@@ -403,6 +405,19 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	//
 	// Restoring the previous view is the whole point. Zooming back in by hand
 	// lands somewhere else, which is the part that made it weird.
+	// "Fit" while you are zoomed in, "Back" once the whole console is showing.
+	// A toggle whose control does not say which way it goes is a guess every
+	// time, and this one is next to two buttons that also make things bigger.
+	var __syncFitLabel = function() {
+		let el = $("stream-fit-button");
+		if (el === null) {
+			return;
+		}
+		let zoomed = __zoom.isZoomed();
+		el.textContent = (zoomed ? "Fit" : "Back");
+		el.title = (zoomed ? "Show the whole console" : "Back to where you were");
+	};
+
 	var __toggleFit = function() {
 		let box = $("stream-box").getBoundingClientRect();
 		if (box.width === 0 || box.height === 0) {
@@ -422,6 +437,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 			__zoom.pinch(Number($("stream-zoom-slider").value), {"x": 0, "y": 0});
 		}
 		__applyZoom();
+		__syncFitLabel();
 		// A deliberate choice of view; the follower does not get to argue.
 		__follow_manual_ts = Date.now();
 	};
