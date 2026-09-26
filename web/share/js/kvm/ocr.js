@@ -50,25 +50,43 @@ export function Ocr(__getGeometry) {
 			tools.storage.set("stream.ocr.lang", $("stream-ocr-lang-selector").value);
 		});
 
-		$("stream-ocr-window").addEventListener("blur", __resetSelection);
+		// The overlay forgets its selection when the user leaves it. Focus
+		// moving to a control INSIDE it has not left it -- and a mouse moves
+		// focus there by default the instant the button is pressed, which used
+		// to reset the selection and disable the button before its own click
+		// could ever fire. focusout rather than blur, because only focusout
+		// says where the focus WENT.
+		$("stream-ocr-window").addEventListener("focusout", function(ev) {
+			if (ev.relatedTarget === null || !$("stream-ocr-window").contains(ev.relatedTarget)) {
+				__resetSelection();
+			}
+		});
 		$("stream-ocr-window").addEventListener("resize", __resetSelection);
 		$("stream-ocr-window").close_hook = __resetSelection;
 
 		$("stream-ocr-window").onkeyup = function(ev) {
 			ev.preventDefault();
 			if (ev.code === "Enter") {
-				if (__sel) {
-					__recognizeSelection();
-					wm.closeWindow($("stream-ocr-window"));
-				}
+				__confirmSelection();
 			} else if (ev.code === "Escape") {
 				wm.closeWindow($("stream-ocr-window"));
 			}
 		};
 
-		$("stream-ocr-window").onmousedown = __startSelection;
-		$("stream-ocr-window").onmousemove = __changeSelection;
-		$("stream-ocr-window").onmouseup = __endSelection;
+		// Enter and Escape are the whole interface to this overlay, and a phone
+		// has neither. The two buttons are the same two actions, reachable --
+		// and they are shown to everybody rather than gated on a media query,
+		// because "has a keyboard" is not something the page can ask.
+		tools.el.setOnClick($("stream-ocr-confirm-button"), __confirmSelection);
+		tools.el.setOnClick($("stream-ocr-cancel-button"), () => wm.closeWindow($("stream-ocr-window")));
+
+		// A box drawn by a finger is the same box drawn by a mouse.
+		tools.el.setOnDrag($("stream-ocr-window"), {
+			"onStart": __startSelection,
+			"onMove": __changeSelection,
+			"onEnd": __endSelection,
+			"onCancel": __resetSelection,
+		});
 	};
 
 	/************************************************************************/
@@ -76,7 +94,11 @@ export function Ocr(__getGeometry) {
 	self.setState = function(state) {
 		if (state) {
 			if (state.enabled !== undefined) {
-				__enabled = (state.enabled && !tools.browser.is_mobile);
+				// Not gated on (hover: hover) any more. Selection was bound to
+				// the mouse only, so the whole feature used to be switched off
+				// wherever there was no pointer -- a capability silently absent
+				// on a phone rather than adapted to it.
+				__enabled = state.enabled;
 				tools.feature.setEnabled($("stream-ocr"), __enabled);
 				$("stream-ocr-led").className = (__enabled ? "led-gray" : "hidden");
 			}
@@ -99,30 +121,62 @@ export function Ocr(__getGeometry) {
 		el.value = tools.storage.get("stream.ocr.lang", langs["default"]);
 	};
 
-	var __startSelection = function(ev) {
-		if (__start_pos === null) {
-			tools.hidden.setVisible($("stream-ocr-selection"), false);
-			__start_pos = __getGlobalPosition(ev);
-			__end_pos = null;
-		}
+	// The buttons sit on top of the drawing surface, so a tap on one must not
+	// also start a box behind it.
+	var __isControl = function(target) {
+		return $("stream-ocr-controls").contains(target);
 	};
 
-	var __changeSelection = function(ev) {
+	var __startSelection = function(point, ev) {
+		if (__isControl(ev.target)) {
+			return;
+		}
+		if (ev.buttons !== undefined && ev.buttons !== 1) {
+			// Not the primary button on its own: a second button pressed during
+			// a drag, or a right/middle press. Neither draws.
+			return;
+		}
+		// A fresh press always starts a fresh box. This used to be guarded on
+		// `__start_pos === null`, which wedged PERMANENTLY the first time a
+		// release went missing -- released over a disabled control, where the
+		// engine suppresses the event, or outside the overlay entirely. Every
+		// later selection was then anchored to a corner the user drew once,
+		// silently, and that rectangle is what got recognised.
+		tools.hidden.setVisible($("stream-ocr-selection"), false);
+		__setSelection(null);
+		__start_pos = __getGlobalPosition(point);
+		__end_pos = null;
+	};
+
+	var __changeSelection = function(point) {
 		if (__start_pos !== null) {
-			__end_pos = __getGlobalPosition(ev);
+			__end_pos = __getGlobalPosition(point);
 			let width = Math.abs(__start_pos.x - __end_pos.x);
 			let height = Math.abs(__start_pos.y - __end_pos.y);
 			let el = $("stream-ocr-selection");
-			el.style.left = Math.min(__start_pos.x, __end_pos.x) + "px";
-			el.style.top = Math.min(__start_pos.y, __end_pos.y) + "px";
+			// The box is drawn INSIDE the overlay, so the client coordinates
+			// the gesture is measured in have to be rebased onto the overlay's
+			// own origin. This used to be a Firefox-only correction that
+			// assumed the navbar's height ("на лисе наблюдается оффсет из-за
+			// навбара"): the offset is real in any browser wherever the overlay
+			// does not start at the top of the page, which in the compact
+			// layout is always -- the box was drawn 55px below the finger.
+			let base = $("stream-ocr-window").getBoundingClientRect();
+			el.style.left = (Math.min(__start_pos.x, __end_pos.x) - base.left) + "px";
+			el.style.top = (Math.min(__start_pos.y, __end_pos.y) - base.top) + "px";
 			el.style.width = width + "px";
 			el.style.height = height + "px";
 			tools.hidden.setVisible(el, (width > 1 || height > 1));
 		}
 	};
 
-	var __endSelection = function(ev) {
-		__changeSelection(ev);
+	var __endSelection = function(point) {
+		if (__start_pos === null) {
+			// A release with no press of ours: nothing to finish. A tap on a
+			// control lands here, because __startSelection ignored its press.
+			return;
+		}
+		__changeSelection(point);
 		let el = $("stream-ocr-selection");
 		let ok = (
 			el.offsetWidth > 1 && el.offsetHeight > 1
@@ -133,46 +187,52 @@ export function Ocr(__getGeometry) {
 			let rect = $("stream-box").getBoundingClientRect();
 			let rel_left = Math.min(__start_pos.x, __end_pos.x) - rect.left;
 			let rel_right = Math.max(__start_pos.x, __end_pos.x) - rect.left;
-			let offset = __getNavbarOffset();
-			let rel_top = Math.min(__start_pos.y, __end_pos.y) - rect.top + offset;
-			let rel_bottom = Math.max(__start_pos.y, __end_pos.y) - rect.top + offset;
+			let rel_top = Math.min(__start_pos.y, __end_pos.y) - rect.top;
+			let rel_bottom = Math.max(__start_pos.y, __end_pos.y) - rect.top;
 			let geo = __getGeometry();
-			__sel = {
+			__setSelection({
 				"left": tools.remap(rel_left - geo.x, 0, geo.width, 0, geo.real_width),
 				"right": tools.remap(rel_right - geo.x, 0, geo.width, 0, geo.real_width),
 				"top": tools.remap(rel_top - geo.y, 0, geo.height, 0, geo.real_height),
 				"bottom": tools.remap(rel_bottom - geo.y, 0, geo.height, 0, geo.real_height),
-			};
+			});
 		} else {
-			__sel = null;
+			__setSelection(null);
 		}
 		__start_pos = null;
 		__end_pos = null;
 	};
 
-	var __getGlobalPosition = function(ev) {
-		let rect = $("stream-box").getBoundingClientRect();
-		let geo = __getGeometry();
-		let offset = __getNavbarOffset();
-		return {
-			"x": Math.min(Math.max(ev.clientX, rect.left + geo.x), rect.right - geo.x),
-			"y": Math.min(Math.max(ev.clientY - offset, rect.top + geo.y - offset), rect.bottom - geo.y - offset),
-		};
+	// One place decides both what will be recognized and whether the button
+	// that recognizes it can be pressed, so the two cannot disagree.
+	var __setSelection = function(sel) {
+		__sel = sel;
+		tools.el.setEnabled($("stream-ocr-confirm-button"), (sel !== null));
 	};
 
-	var __getNavbarOffset = function() {
-		if (tools.browser.is_firefox) {
-			// На лисе наблюдается оффсет из-за навбара, хз почему
-			return wm.getViewGeometry().top;
+	var __confirmSelection = function() {
+		if (__sel) {
+			__recognizeSelection();
+			wm.closeWindow($("stream-ocr-window"));
 		}
-		return 0;
+	};
+
+	// Client coordinates throughout, clamped to the video: one basis, and the
+	// rebase onto the overlay happens in the one place that draws.
+	var __getGlobalPosition = function(point) {
+		let rect = $("stream-box").getBoundingClientRect();
+		let geo = __getGeometry();
+		return {
+			"x": Math.min(Math.max(point.x, rect.left + geo.x), rect.right - geo.x),
+			"y": Math.min(Math.max(point.y, rect.top + geo.y), rect.bottom - geo.y),
+		};
 	};
 
 	var __resetSelection = function() {
 		tools.hidden.setVisible($("stream-ocr-selection"), false);
 		__start_pos = null;
 		__end_pos = null;
-		__sel = null;
+		__setSelection(null);
 	};
 
 	var __recognizeSelection = function() {

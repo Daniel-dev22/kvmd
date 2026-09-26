@@ -24,7 +24,27 @@
 
 
 import {tools, $} from "../tools.js";
+import {HOVER_QUERY, UI_MOBILE} from "../ui.js";
+import {wm} from "../wm.js";
 import {Keypad} from "../keypad.js";
+import {TouchGestures} from "../gestures.js";
+import {makeZoom, containFit, ZOOM_MIN, ZOOM_MAX} from "./zoom.js";
+import {changedRegion, shouldFollow, followPan, FOLLOW_COLS, FOLLOW_ROWS, FOLLOW_HZ, FOLLOW_MANUAL_HOLD_MS} from "./follow.js";
+
+
+// A real click has a duration. It also makes the on-screen Left button visibly
+// flash, which is the only acknowledgement a phone user gets that their tap
+// became a click -- there is no cursor under their finger to watch.
+const CLICK_MS = 50;
+
+// Every button the pad can latch. A latched button means a drag is in progress
+// on the host, and a gesture must not interfere with one.
+const BUTTONS = ["left", "middle", "right", "up", "down"];
+
+// Where a phone's console view starts, and the default it replaced -- see the
+// migration in __init__ for why the old one has to be named.
+const ZOOM_COMPACT_DEFAULT = 2.5;
+const ZOOM_COMPACT_SUPERSEDED = 2;
 
 
 export function Mouse(__getGeometry, __recordWsEvent) {
@@ -37,16 +57,71 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	var __abs = true;
 
 	var __keypad = null;
+	var __gestures = null;
+	var __zoom = null;
+	var __pinch = null; // The previous two-finger frame, while one is in progress
 
 	var __timer = null;
 
 	var __touch_pos = null;
+	var __click_timers = {};
+	// Whether the gesture under way is allowed to click at all, decided once
+	// when the first finger lands -- see __tapClickAllowed().
+	var __gesture_live = false;
 
 	var __abs_pos = null;
 	var __rel_deltas = [];
 
 	var __init__ = function() {
 		__keypad = new Keypad($("mouse-buttons"), __sendButton);
+		__zoom = new makeZoom();
+
+		// Where the view starts on every load. A phone cannot read a 1920x1080
+		// console at 1x -- 4.8px per character -- and zooming in by hand after
+		// every page load is not a thing anyone should have to do. 250% was
+		// chosen ON A PHONE; it is the one number here that cannot be derived.
+		//
+		// bindSimpleSlider writes its default to storage on the FIRST load, so
+		// raising the default alone reaches nobody who has already opened the
+		// page: their phone is holding the old one. Anyone still sitting on
+		// exactly the superseded default is carried forward with it, once.
+		if (
+			Number(tools.storage.get("stream.zoom", ZOOM_COMPACT_DEFAULT)) === ZOOM_COMPACT_SUPERSEDED
+			&& !tools.storage.getBool("stream.zoom.bumped", false)
+		) {
+			tools.storage.set("stream.zoom", ZOOM_COMPACT_DEFAULT);
+		}
+		tools.storage.setBool("stream.zoom.bumped", true);
+
+		tools.storage.bindSimpleSlider($("stream-zoom-slider"), "stream.zoom", ZOOM_MIN, ZOOM_MAX, 0.25, ZOOM_COMPACT_DEFAULT, function(value) {
+			$("stream-zoom-value").innerText = `${Math.round(value * 100)}%`;
+			__resetZoom(value);
+			__syncFitLabel();
+		});
+
+		tools.storage.bindSimpleSwitch($("stream-follow-switch"), "stream.follow", true, function(value) {
+			if (value) {
+				__followStart();
+			} else {
+				__followStop();
+			}
+		});
+		// Sampling a video nobody is looking at is pure battery on a phone.
+		document.addEventListener("visibilitychange", function() {
+			if (document.hidden) {
+				__followStop();
+			} else if ($("stream-follow-switch").checked) {
+				__followStart();
+			}
+		});
+
+		__gestures = new TouchGestures({
+			"onClick": __touchClick,
+			// "A right click is ready; lift to send it." The keypad learned
+			// this lesson first: a 500ms promotion that arrives with no warning
+			// is not something a user can consent to.
+			"onArm": (on) => $("stream-box").classList.toggle("stream-box-click-armed", on),
+		});
 
 		tools.storage.bindSimpleSlider($("hid-mouse-sens-slider"), "hid.mouse.sens", 0.1, 1.9, 0.1, 1.0, function (value) {
 			$("hid-mouse-sens-value").innerText = value.toFixed(1);
@@ -84,7 +159,15 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		$("stream-box").addEventListener("touchstart", __streamTouchStartHandler);
 		$("stream-box").addEventListener("touchmove", __streamTouchMoveHandler);
 		$("stream-box").addEventListener("touchend", __streamTouchEndHandler);
+		// A cancelled touch never produces a touchend. Without this the button
+		// stays pressed on the host after a system gesture or an incoming call,
+		// and a gesture the user never finished would be read as a tap.
+		$("stream-box").addEventListener("touchcancel", __streamTouchCancelHandler);
 
+		tools.el.setOnClick($("stream-fit-button"), __toggleFit);
+		__syncFitLabel();
+
+		tools.storage.bindSimpleSwitch($("hid-mouse-tap-click-switch"), "hid.mouse.tap_click", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-squash-switch"), "hid.mouse.squash", true);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-y-switch"), "hid.mouse.reverse_scrolling", false);
 		tools.storage.bindSimpleSwitch($("hid-mouse-reverse-scrolling-x-switch"), "hid.mouse.reverse_panning", false);
@@ -144,7 +227,7 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		let is_captured;
 		if (__abs) {
 			is_captured = (
-				tools.browser.is_mobile
+				!window.matchMedia(HOVER_QUERY).matches
 				|| $("stream-box").matches("#stream-box:hover")
 			);
 			let dot = $("hid-mouse-dot-switch").checked;
@@ -214,7 +297,34 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	};
 
 	var __streamTouchStartHandler = function(ev) {
-		ev.preventDefault();
+		// Hold the follower off for the duration of the gesture: with one finger
+		// the video IS the host's pointer, and panning under a drag moves what
+		// that finger maps to, so the host's pointer jumps mid-drag.
+		//
+		// At touchstart a tap and a drag are indistinguishable, so this assumes
+		// the worst. __touchClick lifts it again the moment the gesture turns
+		// out to have been a tap -- a tap moves nothing, and making one cost
+		// four seconds of standing still is the follower getting in the way of
+		// the thing it exists to help.
+		__follow_manual_ts = Date.now();
+		// One finger is ours: preventDefault stops the page panning under it and
+		// stops the browser replaying the whole gesture as mouse events. TWO is
+		// the browser's -- it is the only way to zoom into the host's console on
+		// a phone, and a 1920x1080 console on a 390px screen is 4.8px per
+		// character. Preventing it here is what made the page unpinchable:
+		// 📏 the same synthesized pinch takes the launcher from scale 1 to 2.5
+		// and left /kvm at 1.
+		if (ev.targetTouches.length === 1) {
+			ev.preventDefault();
+		}
+		if (ev.targetTouches.length === 1) {
+			// The first finger on the video: this is where a gesture begins,
+			// and the only honest moment to decide whether it may click.
+			__gesture_live = __tapClickAllowed();
+		}
+		if (__gesture_live) {
+			__gestures.start(__getTouchPoints(ev));
+		}
 		let pos = __getTouchPosition(ev, 0);
 		if (__abs && ev.touches.length === 1) {
 			__abs_pos = pos;
@@ -225,8 +335,288 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 		}
 	};
 
+	// The picture, moved and scaled. Not the box: the overlays inside it are
+	// positioned in the box's own coordinates and would be dragged off with it.
+	// Applied with NO animation, deliberately. __zoom holds the destination the
+	// instant pan() returns, and every mapping -- toPicture for taps and
+	// absolute moves, and the OCR selection -- reads it. Animating the picture
+	// means a tap landing during those frames is sent to where the view is
+	// GOING rather than where the user sees it: 48 picture px of error at 2.5x,
+	// on the surface that presses buttons on someone else's server.
+	var __applyZoom = function() {
+		let z = __zoom.get();
+		let css = (z.scale === ZOOM_MIN ? "" : `translate(${Math.round(z.x)}px, ${Math.round(z.y)}px) scale(${z.scale})`);
+		for (let id of ["stream-image", "stream-video", "stream-canvas"]) {
+			$(id).style.transform = css;
+		}
+	};
+
+	// ======================= following the action =======================
+	//
+	// See follow.js for why the changing region is the right thing to chase.
+	// This half is the sampling: the caller has the video element, the box and
+	// the zoom, and none of that belongs in the arithmetic.
+
+	var __follow_ctx = null;
+	var __follow_prev = null;
+	var __follow_el = null;
+	var __follow_timer = null;
+	var __follow_manual_ts = 0;
+	// The view a fit was taken from, so the next tap can put it back exactly.
+	var __fit_from = null;
+	var __follow_broken = false;
+
+	// The one stream element actually on screen. Which of the three it is
+	// depends on the mode (mjpeg/janus/media), and a video that has not got a
+	// frame yet cannot be drawn from at all.
+	var __followElement = function() {
+		for (let id of ["stream-image", "stream-video", "stream-canvas"]) {
+			let el = $(id);
+			if (el === null || !tools.hidden.isVisible(el)) {
+				continue;
+			}
+			if (el.tagName === "VIDEO" && el.readyState < 2) {
+				continue;
+			}
+			let w = (el.naturalWidth || el.videoWidth || el.width || 0);
+			let h = (el.naturalHeight || el.videoHeight || el.height || 0);
+			if (w > 0 && h > 0) {
+				return el;
+			}
+		}
+		return null;
+	};
+
+	// Where the sampled picture sits inside the box. Measured from the ELEMENT
+	// rather than from the streamer's reported resolution: drawImage took its
+	// bitmap from this element, so this is the only source that cannot
+	// disagree with what was sampled -- and it answers before the streamer has
+	// reported a resolution at all, which is most of a page's first seconds.
+	// Show the whole console, or go back to exactly where you were looking.
+	//
+	// 🔴 Deferred in Phase 6 as "the console zoom has no reset control", on the
+	// grounds that "pinching back out reaches 100% and the slider sets any
+	// value, so nothing is unreachable" and "a fit button is product surface
+	// nobody has asked for". Both halves were true and the conclusion was
+	// wrong: nothing being unreachable is not the same as it being reachable
+	// CHEAPLY, and the cost is paid every time. Reported from the device as
+	// "we zoom in for mobile [so] we could end up at the top or bottom and
+	// need to zoom out and drag which is weird ux".
+	//
+	// Restoring the previous view is the whole point. Zooming back in by hand
+	// lands somewhere else, which is the part that made it weird.
+	// "Fit" while you are zoomed in, "Back" once the whole console is showing.
+	// A toggle whose control does not say which way it goes is a guess every
+	// time, and this one is next to two buttons that also make things bigger.
+	var __syncFitLabel = function() {
+		let el = $("stream-fit-button");
+		if (el === null) {
+			return;
+		}
+		let zoomed = __zoom.isZoomed();
+		el.textContent = (zoomed ? "Fit" : "Back");
+		el.title = (zoomed ? "Show the whole console" : "Back to where you were");
+	};
+
+	var __toggleFit = function() {
+		let box = $("stream-box").getBoundingClientRect();
+		if (box.width === 0 || box.height === 0) {
+			return;
+		}
+		__zoom.setViewport(box.width, box.height);
+		if (__zoom.isZoomed()) {
+			__fit_from = __zoom.get();
+			__zoom.reset();
+		} else if (__fit_from !== null) {
+			__zoom.reset();
+			__zoom.pinch(__fit_from.scale, {"x": 0, "y": 0});
+			__zoom.pan(__fit_from.x - __zoom.get().x, __fit_from.y - __zoom.get().y);
+			__fit_from = null;
+		} else {
+			// Never fitted from anywhere -- fall back to the configured zoom.
+			__zoom.pinch(Number($("stream-zoom-slider").value), {"x": 0, "y": 0});
+		}
+		__applyZoom();
+		__syncFitLabel();
+		// A deliberate choice of view; the follower does not get to argue.
+		__follow_manual_ts = Date.now();
+	};
+
+	var __followPicture = function(el, box) {
+		let nw = (el.naturalWidth || el.videoWidth || el.width || 0);
+		let nh = (el.naturalHeight || el.videoHeight || el.height || 0);
+		if (nw <= 0 || nh <= 0) {
+			return null;
+		}
+		return containFit(nw, nh, box.width, box.height);
+	};
+
+	var __followTick = function() {
+		// Everything that says "not now" is checked BEFORE the sample, because
+		// the sample is the only expensive part -- and every one of these
+		// clears the previous frame, since a sample taken across a gap reports
+		// everything that happened during it as one enormous change.
+		//
+		// The layout is re-read every tick rather than latched at start: it
+		// changes under us on rotation, on a resize across the compact
+		// breakpoint, and whenever the UI type is switched by hand, and a
+		// follower started once at load is either dead or running in the wrong
+		// layout afterwards.
+		if (document.hidden || document.documentElement.getAttribute("data-ui") !== UI_MOBILE) {
+			__follow_prev = null;
+			return;
+		}
+		// A zero-sized box means the stream window is closed. It also means
+		// setViewport(0, 0) would clamp the user's pan away to nothing.
+		let box = $("stream-box").getBoundingClientRect();
+		if (box.width === 0 || box.height === 0) {
+			__follow_prev = null;
+			return;
+		}
+		let z = __zoom.get();
+		if (z.scale <= ZOOM_MIN) {
+			__follow_prev = null;
+			return;
+		}
+		// A single finger on the video is the HOST's pointer. Panning under a
+		// drag in progress moves what the same finger position maps to, so the
+		// host's pointer jumps mid-drag and the selection lands somewhere the
+		// user never went.
+		if (Date.now() - __follow_manual_ts < FOLLOW_MANUAL_HOLD_MS) {
+			__follow_prev = null;
+			return;
+		}
+		let el = __followElement();
+		if (el === null) {
+			__follow_prev = null;
+			return;
+		}
+		if (el !== __follow_el) {
+			// mjpeg -> janus -> media: two renderings of the same console
+			// differ enough to look like a change that never happened.
+			__follow_prev = null;
+			__follow_el = el;
+		}
+
+		let now = null;
+		try {
+			__follow_ctx.drawImage(el, 0, 0, FOLLOW_COLS, FOLLOW_ROWS);
+			now = __follow_ctx.getImageData(0, 0, FOLLOW_COLS, FOLLOW_ROWS).data;
+		} catch (ex) {
+			// A tainted canvas or an element that cannot be drawn from will not
+			// start working on the next tick, so stop rather than fail five
+			// times a second for the rest of the session.
+			__follow_broken = true;
+			__followStop();
+			tools.error("Stream: cannot follow the console:", ex);
+			return;
+		}
+
+		if (__follow_prev !== null) {
+			let region = changedRegion(__follow_prev, now, FOLLOW_COLS, FOLLOW_ROWS);
+			let picture = __followPicture(el, box);
+			if (shouldFollow(region, z.scale) && picture !== null) {
+				__zoom.setViewport(box.width, box.height);
+				let move = followPan({
+					// setViewport clamps, and can have moved the picture since
+					// `z` was read -- a rotation widens the box and pulls it.
+					"view": __zoom.get(),
+					"viewport": {"width": box.width, "height": box.height},
+					// Where the picture actually SITS in that box: `object-fit:
+					// contain` letterboxes it, and the sample grid is of the
+					// picture, not of the box.
+					"picture": picture,
+					"region": region,
+				});
+				if (move.dx !== 0 || move.dy !== 0) {
+					__zoom.pan(move.dx, move.dy);
+					__applyZoom();
+				}
+			}
+		}
+		__follow_prev = now;
+	};
+
+	var __followStart = function() {
+		if (__follow_timer !== null || __follow_broken) {
+			return;
+		}
+		if (__follow_ctx === null) {
+			let canvas = document.createElement("canvas");
+			canvas.width = FOLLOW_COLS;
+			canvas.height = FOLLOW_ROWS;
+			__follow_ctx = canvas.getContext("2d", {"willReadFrequently": true});
+			// 🔴 Without this the downscale POINT-SAMPLES, throwing away 575 of
+			// every 576 source pixels going from 1920x1080 to 80x45 -- so a
+			// cursor smaller than a whole character cell is not dimmer, it is
+			// ABSENT. Measured, detections out of 60 positions at 1920x1080:
+			//
+			//                            default   high
+			//   block 24x36 (full cell)   60/60    60/60
+			//   block 10x20 (box cursor)  24/60    60/60   <- median delta 0
+			//   underline 24x4 (BIOS)     13/60    60/60   <- median delta 0
+			//   bar 2x36 (GUI caret)       7/60    42/60
+			//
+			// The idle-shell case -- the one that makes this worth having --
+			// did not work at the resolution it was built for. It costs: a
+			// sample goes from 0.42ms to 1.58ms at 1080p, which is why every
+			// "not now" test in the tick happens before the sample.
+			__follow_ctx.imageSmoothingEnabled = true;
+			__follow_ctx.imageSmoothingQuality = "high";
+		}
+		__follow_prev = null;
+		__follow_timer = setInterval(__followTick, Math.round(1000 / FOLLOW_HZ));
+	};
+
+	var __followStop = function() {
+		if (__follow_timer !== null) {
+			clearInterval(__follow_timer);
+			__follow_timer = null;
+		}
+		__follow_prev = null;
+	};
+
+	var __resetZoom = function(scale) {
+		let box = $("stream-box").getBoundingClientRect();
+		__zoom.setViewport(box.width, box.height);
+		__zoom.reset();
+		if (document.documentElement.getAttribute("data-ui") === UI_MOBILE && scale > ZOOM_MIN) {
+			// Anchored at the top-left, which is where a console's prompt is
+			// until enough output has pushed it off the bottom -- from there
+			// the follower is what keeps it in view.
+			__zoom.pinch(scale, {"x": 0, "y": 0});
+		}
+		__applyZoom();
+		// A deliberate choice of view, and the stream's first frames after one
+		// change everything at once; both are worth staying out of.
+		__follow_manual_ts = Date.now();
+	};
+
+	// Where a touch is on the PICTURE, which is what the host is told about. At
+	// 1x this is where the finger is; zoomed in, it is not, and a click that
+	// skips this lands a third of the way to where you meant it.
+	var __streamPosition = function(client_x, client_y) {
+		let rect = $("stream-box").getBoundingClientRect();
+		return __zoom.toPicture({"x": client_x - rect.left, "y": client_y - rect.top});
+	};
+
+	var __twoFingers = function(ev) {
+		let a = ev.targetTouches[0];
+		let b = ev.targetTouches[1];
+		return {
+			"dist": Math.max(1, Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)),
+			"x": (a.clientX + b.clientX) / 2,
+			"y": (a.clientY + b.clientY) / 2,
+		};
+	};
+
 	var __streamTouchMoveHandler = function(ev) {
-		ev.preventDefault();
+		if (ev.targetTouches.length === 1) {
+			ev.preventDefault();
+		}
+		if (__gesture_live) {
+			__gestures.move(__getTouchPoints(ev));
+		}
 		let pos = __getTouchPosition(ev, 0);
 		if (ev.touches.length === 1) {
 			if (__abs) {
@@ -238,51 +628,127 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 				});
 				__touch_pos = pos;
 			}
-		} else if (ev.touches.length >= 2) {
-			if (__touch_pos === null) {
-				__touch_pos = pos;
-			} else {
-				let dx = __touch_pos.x - pos.x;
-				let dy = __touch_pos.y - pos.y;
-				if (Math.abs(dx) < 15) {
-					dx = 0;
-				}
-				if (Math.abs(dy) < 15) {
-					dy = 0;
-				}
-				if (dx || dy) {
-					__sendScroll({"x": dx, "y": dy});
-					__touch_pos = null;
-				}
+		} else if (ev.targetTouches.length >= 2) {
+			// Two fingers move the VIEW, not the host: pinch to zoom, drag to
+			// pan. The host's wheel is the Up/Down pair on the mouse pad, which
+			// needs no gesture and cannot be claimed by the browser.
+			let now = __twoFingers(ev);
+			if (__pinch !== null) {
+				let rect = $("stream-box").getBoundingClientRect();
+				__zoom.setViewport(rect.width, rect.height);
+				__zoom.pan(now.x - __pinch.x, now.y - __pinch.y);
+				__zoom.pinch(now.dist / __pinch.dist, {"x": now.x - rect.left, "y": now.y - rect.top});
+				__applyZoom();
+				// They have just said where they want to look.
+				__follow_manual_ts = Date.now();
 			}
+			__pinch = now;
 			__abs_pos = null;
 		}
 	};
 
 	var __streamTouchEndHandler = function(ev) {
-		ev.preventDefault();
+		if (ev.targetTouches.length === 0) {
+			ev.preventDefault();
+		}
 		__sendPlannedMove();
 		__touch_pos = null;
+		if (__gesture_live) {
+			__gestures.end(__getTouchPoints(ev));
+		}
+		if (ev.targetTouches.length === 0) {
+			__gesture_live = false;
+		}
+		if (ev.targetTouches.length < 2) {
+			__pinch = null;
+		}
+	};
+
+	var __streamTouchCancelHandler = function(ev) {
+		if (__gesture_live) {
+			__gestures.cancel(__getTouchPoints(ev));
+		}
+		__sendPlannedMove();
+		__touch_pos = null;
+		__pinch = null;
+		if (ev.targetTouches.length === 0) {
+			__gesture_live = false;
+		}
+	};
+
+	// Decided once per gesture, because every one of these can change while a
+	// finger is down and a gesture that started innocently must not become a
+	// click halfway through.
+	var __tapClickAllowed = function() {
+		if (!$("hid-mouse-tap-click-switch").checked) {
+			return false;
+		}
+		if (wm.isMenuOpen()) {
+			// The tap that dismisses a sheet lands on the video underneath it.
+			// Dismissing something is not clicking the host.
+			return false;
+		}
+		// A latched button is a drag in progress on the host. emit() would
+		// release it -- and __unholdAll() would drop it even for another
+		// button -- so the video stops clicking until the drag is finished.
+		return !BUTTONS.some((code) => __keypad.isCodeActive(code));
+	};
+
+	var __touchClick = function(button) {
+		// This gesture turned out to be a tap (or a long press), not a drag --
+		// it moved nothing, so the reason the follower stood down at touchstart
+		// never materialised. Released here rather than on touchend because
+		// this is where "it was a tap" is already decided; deciding it twice is
+		// how two definitions of a tap drift apart. Before the latch check
+		// below, which returns early but is still a tap.
+		__follow_manual_ts = 0;
+
+		// A tap is a click on the host. In absolute mode the cursor is already
+		// under the finger; in relative mode this is a trackpad, and the click
+		// lands where the host's own cursor is.
+		if (__keypad.isCodeActive(button)) {
+			// emit(code, true) on a key that is already down RELEASES it. A
+			// latched button belongs to the user, not to this gesture.
+			return;
+		}
+		if (__click_timers[button]) {
+			// Tapping again before the previous click has finished: end it
+			// first, so a double tap is two clicks rather than one long press.
+			clearTimeout(__click_timers[button]);
+			__keypad.emit(button, false);
+		}
+		__keypad.emit(button, true);
+		__click_timers[button] = setTimeout(function() {
+			__click_timers[button] = null;
+			__keypad.emit(button, false);
+		}, CLICK_MS);
+	};
+
+	var __getTouchPoints = function(ev) {
+		// targetTouches, NOT touches: the fingers that started on the video and
+		// are still down. `touches` is every contact on the SCREEN, and a touch
+		// only ever dispatches to the element it started on -- so a thumb
+		// resting below the video appears in every event here and its lift
+		// never does, which left the gesture counting two fingers forever.
+		let points = [];
+		for (let touch of ev.targetTouches) {
+			points.push({"id": touch.identifier, "x": touch.clientX, "y": touch.clientY});
+		}
+		return points;
 	};
 
 	var __getTouchPosition = function(ev, index) {
-		if (ev.touches[index].target && ev.touches[index].target.getBoundingClientRect) {
-			let rect = ev.touches[index].target.getBoundingClientRect();
-			return {
-				"x": Math.round(ev.touches[index].clientX - rect.left),
-				"y": Math.round(ev.touches[index].clientY - rect.top),
-			};
-		}
-		return null;
+		let touch = ev.touches[index];
+		// Against the BOX, never against ev.target: the target is whichever of
+		// the stacked picture elements was under the finger, and each of them
+		// carries the zoom transform, so its own rect is already scaled.
+		return (touch ? __streamPosition(touch.clientX, touch.clientY) : null);
 	};
 
 	var __streamMoveHandler = function(ev) {
 		if (__abs) {
-			let rect = ev.target.getBoundingClientRect();
-			__abs_pos = {
-				"x": Math.max(Math.round(ev.clientX - rect.left), 0),
-				"y": Math.max(Math.round(ev.clientY - rect.top), 0),
-			};
+			let pos = __streamPosition(ev.clientX, ev.clientY);
+			__abs_pos = {"x": Math.max(pos.x, 0), "y": Math.max(pos.y, 0)};
 		} else if (__isRelativeCaptured()) {
 			__sendOrPlanRelativeMove({
 				"x": ev.movementX,
@@ -327,6 +793,10 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 	/************************************************************************/
 
 	var __sendOrPlanRelativeMove = function(delta) {
+		// Zoomed in, a finger crossing 30px of glass has crossed 15px of the
+		// host's screen. Without this the cursor runs away from the finger.
+		let scale = __zoom.get().scale;
+		delta = {"x": delta.x / scale, "y": delta.y / scale};
 		let sens = $("hid-mouse-sens-slider").valueAsNumber;
 		let boost = $("hid-mouse-boost-slider").valueAsNumber;
 		delta = {

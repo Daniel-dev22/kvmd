@@ -24,6 +24,7 @@
 
 
 import {tools, $, $$, $$$} from "./tools.js";
+import {UI_MOBILE} from "./ui.js";
 
 
 export var wm;
@@ -41,6 +42,7 @@ function __WindowManager() {
 		for (let el of $$("menu-button")) {
 			let el_menu = el.parentElement;
 			el_menu.querySelector(".menu").tabIndex = -1;
+			__addMenuDismiss(el_menu.querySelector(".menu"));
 			tools.el.setOnDown(el, () => __toggleMenu(el));
 			el_menu.addEventListener("keyup", function(ev) {
 				if (ev.code === "Escape") {
@@ -128,6 +130,20 @@ function __WindowManager() {
 			});
 		}
 
+		// Compact: the sections are a grid behind one button. Bound as a press
+		// rather than a click, exactly like the dropdown triggers beside it, so
+		// the sheet appears under the finger that asked for it.
+		let el_sections_bt = $("navbar-menu-button");
+		if (el_sections_bt !== null) {
+			tools.el.setOnDown(el_sections_bt, function() {
+				// Read the state BEFORE closing everything, or the close makes
+				// every press an open.
+				let want = !self.isSectionsOpen();
+				__closeAllMenues();
+				self.setSectionsOpen(want);
+			});
+		}
+
 		window.addEventListener("mouseup", (ev) => __globalMouseButtonHandler(ev.target));
 		window.addEventListener("touchend", (ev) => __globalMouseButtonHandler(ev.target));
 
@@ -174,6 +190,26 @@ function __WindowManager() {
 
 		window.addEventListener("resize", __organizeAllWindows);
 		window.addEventListener("orientationchange", __organizeAllWindows);
+		if (window.visualViewport) {
+			// Fires for the URL bar collapsing and the on-screen keyboard
+			// opening -- neither of which raises a window resize event.
+			for (let what of ["resize", "scroll"]) {
+				window.visualViewport.addEventListener(what, function() {
+					__updateKeyboardInset();
+					__organizeAllWindows();
+				});
+			}
+		}
+		__updateKeyboardInset();
+
+		// The docked sheet's height changes without any window being organized --
+		// switching keyboard layer, or the typing bar collapsing the board -- and
+		// measuring during __organizeWindow() catches the layout mid-flight.
+		// Observing the windows keeps the offset true whenever it actually moves.
+		let dock_observer = new ResizeObserver(__updateDockOffset);
+		for (let el_win of $$("window")) {
+			dock_observer.observe(el_win);
+		}
 	};
 
 	/************************************************************************/
@@ -351,14 +387,24 @@ function __WindowManager() {
 		}
 	};
 
+	var __isCompact = function() {
+		return (document.documentElement.getAttribute("data-ui") === UI_MOBILE);
+	};
+
 	self.getViewGeometry = function() {
 		let el = $("navbar");
 		let hidden = (!el || !tools.hidden.isVisible(el));
+		// visualViewport is the region the user can actually see and touch. It
+		// excludes a phone's dynamic URL bar and shrinks when the on-screen
+		// keyboard opens, whereas window.innerHeight reports the layout
+		// viewport -- which on a phone is regularly taller than the screen, so
+		// windows were being placed under the browser chrome.
+		let vv = window.visualViewport;
 		return {
 			"top": (hidden ? 0 : el.clientHeight), // Navbar height
-			"bottom": Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
+			"bottom": (vv ? vv.height : Math.max(document.documentElement.clientHeight, window.innerHeight || 0)),
 			"left": 0,
-			"right": Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
+			"right": (vv ? vv.width : Math.max(document.documentElement.clientWidth, window.innerWidth || 0)),
 		};
 	};
 
@@ -451,11 +497,36 @@ function __WindowManager() {
 
 	var __closeWindow = function(el_win) {
 		tools.hidden.setVisible(el_win, false);
+		__updateDockOffset();
 		el_win.focus();
 		el_win.blur();
 		if (el_win.close_hook) {
 			el_win.close_hook();
 		}
+	};
+
+	// The compact grid of sections is open. It is a state of the navbar, so the
+	// class and the question about it both live here.
+	self.isSectionsOpen = function() {
+		return $("navbar").classList.contains("navbar-sections-open");
+	};
+
+	self.setSectionsOpen = function(on) {
+		$("navbar").classList.toggle("navbar-sections-open", on);
+		$("navbar-menu-button").setAttribute("aria-expanded", String(on));
+	};
+
+	// A navbar menu is open. The stream asks before turning a touch into a
+	// click: the tap that dismisses a sheet lands on the video underneath it,
+	// and dismissing something is not clicking the host. Menus are this
+	// module's business, so the selector for them lives here and nowhere else.
+	self.isMenuOpen = function() {
+		for (let el_bt of $$("menu-button")) {
+			if (tools.hidden.isVisible(el_bt.parentElement.querySelector(".menu"))) {
+				return true;
+			}
+		}
+		return false;
 	};
 
 	var __toggleMenu = function(el_a) {
@@ -469,9 +540,14 @@ function __WindowManager() {
 			el_bt.classList.toggle("menu-button-pressed", open);
 
 			if (open) {
-				let rect = el_menu.getBoundingClientRect();
-				let offset = self.getViewGeometry().right - (rect.left + el_menu.offsetWidth);
-				el_menu.style.right = Math.max(0, offset) + "px";
+				if (!__isCompact()) {
+					// Keep an anchored dropdown inside the view. In compact the
+					// menu is a full-width sheet positioned by CSS, and writing
+					// an inline offset here would fight it.
+					let rect = el_menu.getBoundingClientRect();
+					let offset = self.getViewGeometry().right - (rect.left + el_menu.offsetWidth);
+					el_menu.style.right = Math.max(0, offset) + "px";
+				}
 
 				let el_focus = el_menu.querySelector("[data-wm-menu-focus]");
 				(el_focus !== null ? el_focus : el_menu).focus();
@@ -483,10 +559,41 @@ function __WindowManager() {
 
 		if (all_hidden) {
 			__activateLastWindow();
+		} else {
+			// The sheet that just opened IS the answer to the grid.
+			self.setSectionsOpen(false);
 		}
 	};
 
+	// Every sheet gets a way out of it.
+	//
+	// Injected here rather than written into each section's template: there are
+	// eight of them in six files and a ninth would forget. Reported from a
+	// phone as "none of the menu popup have an X" -- they close by tapping the
+	// navbar button again or by tapping the video behind them, and neither of
+	// those is visible.
+	//
+	// It carries data-wm-menu-force-hide, which is the mechanism this file
+	// already uses for a control inside a menu that should dismiss it, rather
+	// than a second path that could disagree with the first.
+	var __addMenuDismiss = function(el_menu) {
+		if (el_menu === null || el_menu.querySelector(".menu-dismiss") !== null) {
+			return;
+		}
+		let el_row = document.createElement("div");
+		el_row.className = "menu-dismiss";
+		let el_bt = document.createElement("button");
+		el_bt.type = "button";
+		el_bt.setAttribute("data-wm-menu-force-hide", "");
+		el_bt.setAttribute("aria-label", "Close");
+		el_bt.title = "Close";
+		el_bt.innerHTML = "&times;";
+		el_row.appendChild(el_bt);
+		el_menu.insertBefore(el_row, el_menu.firstChild);
+	};
+
 	var __closeAllMenues = function() {
+		self.setSectionsOpen(false);
 		for (let el_bt of $$("menu-button")) {
 			let el_menu = el_bt.parentElement.querySelector(".menu");
 			el_bt.classList.remove("menu-button-pressed");
@@ -520,6 +627,11 @@ function __WindowManager() {
 			return;
 		}
 
+		if (el.closest("#navbar-menu-button")) {
+			// Its own press already decided what the grid should do.
+			return;
+		}
+
 		if (
 			el.closest(".menu-button")
 			|| (el.closest(".menu") && !el.closest("[data-wm-menu-force-hide]"))
@@ -544,6 +656,45 @@ function __WindowManager() {
 			__closeAllMenues();
 			__activateLastWindow();
 		}, 10);
+	};
+
+	self.organizeAllWindows = function() {
+		__organizeAllWindows();
+	};
+
+	// In the compact layout every window is docked to the bottom edge, so two
+	// visible ones would sit on top of each other. The mouse pad is always on
+	// top (it is the persistent control surface), which meant it covered the
+	// bottom of whatever sheet was open -- including the typing bar, so tapping
+	// the typing bar hit the mouse pad instead. The pad now rides above the
+	// open sheet rather than on it.
+	// How much of the layout viewport the system keyboard is covering. On
+	// Android the layout viewport itself shrinks, so this is ~0; on iOS it does
+	// NOT -- only the visual viewport shrinks -- so without this a docked sheet
+	// sits behind the keyboard, invisible and untouchable.
+	var __updateKeyboardInset = function() {
+		let vv = window.visualViewport;
+		let inset = 0;
+		if (vv) {
+			inset = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
+		}
+		document.documentElement.style.setProperty("--wm-kb-inset", `${inset}px`);
+	};
+
+	var __updateDockOffset = function() {
+		let offset = 0;
+		if (__isCompact()) {
+			for (let el_win of $$("window")) {
+				if (el_win.id !== "mouse-window"
+					&& !el_win.classList.contains("window-full-tab")
+					&& tools.hidden.isVisible(el_win)) {
+					// Fractional: offsetHeight rounds to an integer, which left
+					// the pad a pixel or two INSIDE the sheet below it.
+					offset = Math.max(offset, el_win.getBoundingClientRect().height);
+				}
+			}
+		}
+		document.documentElement.style.setProperty("--wm-dock-offset", `${Math.ceil(offset)}px`);
 	};
 
 	var __organizeAllWindows = function() {
@@ -580,6 +731,7 @@ function __WindowManager() {
 		} else {
 			__organizeFitWindow(el_win);
 		}
+		__updateDockOffset();
 	};
 
 	var __organizeCenterWindow = function(el_win) {

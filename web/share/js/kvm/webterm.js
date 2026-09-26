@@ -19,13 +19,27 @@
 #                                                                            #
 *****************************************************************************/
 
+// The terminal is somebody else's application in an iframe, and the size of its
+// type is NOT set from here.
+//
+// ttyd does read options off its URL -- `fontSize` included; the parser is in
+// the build running on the appliance -- and that was tried first, at 18px and
+// then at 30px. Both were reported from the phone as having no effect, and
+// nothing this side of the iframe can prove otherwise: the query has to survive
+// kvmd's proxying, the redirect to login, and ttyd's own websocket handshake
+// before it means anything. A knob that cannot be verified is not a knob.
+//
+// What replaced it is `zoom` on the iframe, in kvm/stream.css, which needs
+// nothing from ttyd: the terminal is handed half the viewport, lays itself out
+// for that, and every pixel it draws comes out twice the size. See the comment
+// there for the measurement.
 
-/* ===== Misc ===== */
+"use strict";
 
-button#mouse-window-navbar-button {
-	display: none !important;
-}
 
-button#mouse-window-keyboard-button {
-	display: none !important;
+export function webtermUrl(base, path) {
+	// The trailing slash avoids an Nginx 301 when the location has none, which
+	// a reverse proxy in front of PiKVM can be misconfigured to mishandle.
+	// disableLeaveAlert stops ttyd asking "are you sure?" on every navigation.
+	return base + path + "/?disableLeaveAlert=true";
 }

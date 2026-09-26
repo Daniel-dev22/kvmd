@@ -566,7 +566,7 @@ export function JanusStreamer(__setActive, __setInactive, __setInfo, __watchHook
 					if (__handle?.webrtcStuff?.pc) {
 						for (let sender of __handle.webrtcStuff.pc.getSenders()) {
 							if (sender.track === track) {
-								if (tools.browser.is_mobile) {
+								if (tools.browser.is_ios || tools.browser.is_android) {
 									try {
 										__logInfo("Patching camera track for auto-rotate ...");
 										let s_track = _makeSmartCameraTrack(track, __camera_req.resolution);

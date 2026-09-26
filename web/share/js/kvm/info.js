@@ -25,6 +25,7 @@
 
 import {ROOT_PREFIX} from "../vars.js";
 import {tools, $} from "../tools.js";
+import {webtermUrl} from "./webterm.js";
 
 
 export function Info() {
@@ -253,11 +254,8 @@ export function Info() {
 		if (has_webterm) {
 			let loc = window.location;
 			let base = `${loc.protocol}//${loc.host}${loc.pathname}${ROOT_PREFIX}`;
-			// Tailing slash after state.webterm.path is added to avoid Nginx 301 redirect
-			// when the location doesn't have tailing slash: "foo -> foo/".
-			// Reverse proxy over PiKVM can be misconfigured to handle this.
-			let url = base + state.webterm.path + "/?disableLeaveAlert=true";
 			show_hook = function() {
+				let url = webtermUrl(base, state.webterm.path);
 				tools.info("Terminal opened: ", url);
 				$("webterm-iframe").src = url;
 			};

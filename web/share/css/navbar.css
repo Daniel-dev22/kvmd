@@ -88,6 +88,12 @@ ul#navbar li .menu-item img {
 	height: 20px;
 }
 
+/* The logo's own size. It was an inline `height: 25px`, which no compact rule
+   could ever override -- the same trap as the paste sheet's width. */
+ul#navbar li a.menu-item img.svg-gray {
+	height: 25px;
+}
+
 ul#navbar li .menu-action {
 	cursor: pointer;
 }
@@ -134,6 +140,22 @@ ul#navbar li div.menu {
 	box-shadow: var(--shadow-big);
 	z-index: 2147483645;
 }
+/* The paste sheet is capped so it does not stretch to the width of its longest
+   line. This lives here rather than as an inline style on the element, because
+   an inline width beats a stylesheet rule at any specificity -- which is how
+   the compact sheet, which must span the viewport, was coming out 360px wide
+   with a 30px strip of stream showing beside it. */
+/* This table fills the spoiler it sits in. It carried `width: 100%` inline
+   until this phase; a class rather than an inline style, so the compact rules
+   can still win -- an inline width outranks them at any specificity. */
+:root[data-ui="desktop"] ul#navbar li div.menu table.kv.wide {
+	width: 100%;
+}
+
+:root[data-ui="desktop"] ul#navbar li div.menu#text-menu {
+	width: min(360px, 100vw);
+}
+
 ul#navbar li div.menu-active {
 	border: var(--border-navbar-menu-active-2px) !important;
 	border-top: var(--border-navbar-menu-top-thin) !important;
@@ -259,4 +281,363 @@ ul.navbar-bg-tips li.right {
 }
 ul.navbar-bg-tips li a {
 	color: var(--cs-page-obscure-fg);
+}
+
+
+/* =========================================================================
+   Layout and capability rules -- see share/js/ui.js for the data-ui switch.
+   ========================================================================= */
+
+@media (hover: hover) {
+	ul#navbar li .menu-action:hover {
+		background-color: var(--cs-navbar-item-hovered-bg);
+	}
+
+	ul#navbar li .menu-button:hover:not(.menu-button-pressed) {
+		background-color: var(--cs-navbar-default-bg);
+	}
+}
+
+/* An anchored dropdown is a desktop idea: in compact the panel leaves the bar
+   entirely and becomes a bounded sheet with its own scroll. */
+:root[data-ui="mobile"] ul#navbar li div.menu {
+	/* content-box plus a 2px border makes a full-width sheet 4px wider than the
+	   viewport, which is enough to push the page sideways. */
+	box-sizing: border-box;
+	border-left: 0;
+	border-right: 0;
+	position: fixed;
+	top: auto;
+	left: 0;
+	right: 0 !important;
+	bottom: 0;
+	width: auto;
+	max-width: 100%;
+	max-height: 70dvh;
+	white-space: normal;
+	overflow-y: auto;
+	border-radius: 12px 12px 0 0;
+	border-top: var(--border-intensive-2px);
+	padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* The way out of a sheet. Desktop dropdowns close by clicking away from them
+   and have a cursor to do it with; a phone has neither, and the sheet covers
+   the thing you would tap to dismiss it. STICKY, so a long sheet that has been
+   scrolled still has its exit on screen -- the one place you most need it. */
+div.menu div.menu-dismiss {
+	display: none;
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu div.menu-dismiss {
+	display: flex;
+	justify-content: flex-end;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background-color: var(--cs-navbar-default-bg);
+	border-bottom: var(--border-menu-item-content-top-thin);
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu div.menu-dismiss button {
+	min-width: 48px;
+	min-height: 48px;
+	border: none;
+	background: none;
+	color: var(--cs-navbar-default-fg);
+	font-size: 26px;
+	line-height: 1;
+}
+
+/* A table is not a block: it shrink-to-fits, so it has to be told to stretch.
+   `width: 100%` is the wrong instruction -- a percentage resolves against the
+   containing block and the element's own margins are then added OUTSIDE it. So
+   table.kv (main.css: `margin: 0 10px`) came out 20px wider than the sheet on
+   every populated menu, and the sheet's `overflow-x: hidden` clipped it.
+   `stretch` means "the containing block MINUS my own margins", which is what
+   was meant -- and it stays correct if that margin ever changes, and it nests,
+   because each table resolves against its own containing block. The first two
+   spellings are the same keyword in Firefox and in Safari/older Chrome; later
+   declarations win where they are understood and are dropped where they are
+   not. */
+:root[data-ui="mobile"] ul#navbar li div.menu table {
+	width: -moz-available;
+	width: -webkit-fill-available;
+	width: stretch;
+}
+
+/* Menu content is laid out as label/control TABLES, which is a desktop shape: a
+   table column can never be narrower than its widest unbreakable word, so at
+   phone width the columns are SQUEEZED rather than the row being allowed to
+   grow. The switch port list is the worst case -- it fits 8 columns into 370px
+   by rendering "Port:" as "Po rt:", "Host 1" as "Ho st 1" and "Reset" as "Re
+   set". Every cell was reachable and none of it was readable.
+
+   In compact a row becomes a flex line and each cell an item on it, so a row
+   that does not fit WRAPS instead of compressing. Only table.kv is converted,
+   and only through its own direct row/cell chain: the bare tables nested inside
+   it still need real table layout (menu_message's icon column, menu_slider's
+   one row of two). A nested table.kv matches on its own.
+
+   Two things the conversion gives up, both checked: `rowspan` and `colspan`
+   stop meaning anything, which matters in exactly one place -- the EDID
+   table's `td[rowspan=2]` info panel, which wraps to its own line and reads
+   fine -- and the GPIO view is excluded above, because there the columns are
+   the user's own grid from override.yaml and their alignment is the point,
+   not a desktop artefact. */
+:root[data-ui="mobile"] ul#navbar li div.menu:not(#gpio-menu) table.kv,
+:root[data-ui="mobile"] ul#navbar li div.menu:not(#gpio-menu) table.kv > tbody {
+	display: block;
+}
+:root[data-ui="mobile"] ul#navbar li div.menu:not(#gpio-menu) table.kv > tbody > tr {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	/* border-spacing does not apply to a flex line, so it is replaced here. */
+	gap: 5px;
+	padding: 3px 0;
+}
+:root[data-ui="mobile"] ul#navbar li div.menu:not(#gpio-menu) table.kv > tbody > tr > td {
+	display: block;
+}
+/* A cell whose only content is an <hr> has a max-content width of ZERO, so on a
+   flex line it collapsed to nothing and the separator simply vanished: the
+   Device-colour-scheme spoiler lost its divider, and with a chained Switch so
+   did the rule between units (switch.js builds that row the same way). The
+   cells of a separator row share the line and butt together, so they read as
+   the single rule they are drawn to be. */
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv > tbody > tr:has(> td > hr) {
+	gap: 0;
+}
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv > tbody > tr > td:has(> hr) {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+/* A segmented row butts its buttons edge to edge, which is fine for a mouse and
+   not for a thumb: on a port row `Power short` is 78px, `long` is 35px and
+   `Reset` 47px with NOTHING between them, so a 5px error turns an ACPI shutdown
+   into a hard power-off. In compact they are separated, equally sized, and each
+   at least a fingertip wide. */
+:root[data-ui="mobile"] ul#navbar li div.menu div.buttons-row {
+	gap: 6px;
+	padding: 0 6px;
+}
+:root[data-ui="mobile"] ul#navbar li div.menu div.buttons-row button {
+	/* row16/row25/row33/row50 set a percentage width with !important, which
+	   cannot share a row with a gap. Equal flex basis replaces them. */
+	width: auto !important;
+	flex: 1 1 0;
+	min-width: 44px;
+	border-radius: 4px;
+	border-left: none !important;
+}
+
+/* The switch port list. Each port is ONE row that wraps to two lines, so the
+   gap inside a port is the gap between ports and which Power/Reset pair belongs
+   to which host is left to counting. A rule between rows groups them, and the
+   ATX group is given its own line so a long host name cannot shove it sideways
+   -- without that, a port whose name wrapped had its Reset 117px along and
+   directly above the NEXT port's beacon button. */
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv#switch-chain > tbody > tr + tr {
+	margin-top: 4px;
+	padding-top: 6px;
+	border-top: var(--border-default-thin);
+}
+:root[data-ui="mobile"] ul#navbar li div.menu table.kv#switch-chain > tbody > tr > td:last-child {
+	flex: 1 1 100%;
+}
+
+/* The slider's value cell is pinned to 40px so the desktop slider does not jump
+   about as the number changes. On a wrapped line there is no column to keep
+   steady, and 40px is not enough for "Unlimited", which was being broken across
+   two lines as "Unlimi/ted". It sizes to its value here.
+
+   Not scoped to a kv row: the cell is inside menu_slider's own nested table,
+   which stays a real table, so `table.kv > tbody > tr > td` never reaches it. */
+:root[data-ui="mobile"] ul#navbar li div.menu td.slider-value {
+	max-width: none;
+	white-space: nowrap;
+}
+
+/* A cell that exists only to hold a table column open has no job on a wrapped
+   line, and several of them carry `width: 100%`, which would take a whole line
+   to show nothing. `:empty` is live, so a cell JS later fills comes back. */
+:root[data-ui="mobile"] ul#navbar li div.menu:not(#gpio-menu) table.kv > tbody > tr > td:empty {
+	display: none;
+}
+
+/* Every control in main.css is a fixed 30px tall, which is a desktop row
+   height and assumes the label fits on one line. At phone width a 33%-wide
+   button is 130px, "• Show stream" wraps to two lines, and the second line was
+   painted outside the button's own background. The button grows to its label
+   instead, and gets a finger's worth of height while it is at it -- 44px is
+   the same minimum the navbar items are already held to. */
+:root[data-ui="mobile"] ul#navbar li div.menu button {
+	height: auto;
+	min-height: 44px;
+	padding-top: 4px;
+	padding-bottom: 4px;
+	line-height: 1.2;
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu td {
+	word-break: break-word;
+}
+
+
+/* =========================================================================
+   Compact: one button, and the sections behind it.
+
+   The strip that was here is gone. 📏 With a Switch attached it measured
+   815px on a 390px screen -- 425px of it (52%) past the right edge, 495px
+   (61%) at 320px -- and ATX, the fourth item, started at x=376. Scrolling it
+   was a real affordance and it was still the wrong shape: seven of nine items
+   were never seen, and a horizontal swipe is not something anyone tries on a
+   toolbar.
+
+   The bar keeps identity and status; every section moves into a grid that
+   opens beneath it. Nothing is hidden behind a ranking, nothing has to fit a
+   width budget, and the top of the screen goes back to being video.
+
+   Desktop is untouched: #navbar-sections is `display: contents` there, so the
+   dropdowns are laid out by the same rules that have always laid them out.
+   ========================================================================= */
+
+div#navbar-sections {
+	display: contents;
+}
+
+:root[data-ui="mobile"] ul#navbar {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: stretch;
+	padding-left: env(safe-area-inset-left);
+	padding-right: env(safe-area-inset-right);
+}
+
+/* Identity, status, then the button -- pushed to the far end, where a thumb
+   reaches it. */
+:root[data-ui="mobile"] ul#navbar > li#navbar-menu {
+	margin-left: auto;
+}
+
+:root[data-ui="mobile"] ul#navbar li#navbar-status .menu-item {
+	gap: 4px;
+	cursor: default;
+}
+
+:root[data-ui="mobile"] ul#navbar li {
+	float: none;
+	flex: 0 0 auto;
+}
+
+/* The sections themselves: a sheet of equal tiles under the bar. Three columns
+   is what fits a label like "Shortcuts" at 320px without shrinking the text. */
+:root[data-ui="mobile"] div#navbar-sections {
+	display: grid;
+	/* ul#navbar is position: fixed, so this hangs off the bar's real height --
+	   no number written down twice. */
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 100%;
+	z-index: 100;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 1px;
+	padding: 1px;
+	background-color: var(--cs-navbar-item-hovered-bg);
+	border-bottom: var(--border-navbar-menu-top-thin);
+	/* A percentage max-height resolves against the bar's height, so this is
+	   "the screen, less the bar". */
+	max-height: calc(100dvh - 100%);
+	overflow-y: auto;
+}
+
+/* Closed, the container is still THERE -- it just has nothing in it. Hiding the
+   container itself would hide the section sheets too, since every one of them
+   is a descendant of it and no amount of `position: fixed` escapes an ancestor
+   that is `display: none`: choosing System would have opened a sheet nobody
+   could see. So the TILES are what come and go. */
+:root[data-ui="mobile"] div#navbar-sections > li > .menu-item {
+	display: none;
+}
+
+:root[data-ui="mobile"] ul#navbar:not(.navbar-sections-open) div#navbar-sections {
+	background: none;
+	border: none;
+	padding: 0;
+	gap: 0;
+}
+
+/* Closed, each section contributes NO BOX: `display: contents` leaves its
+   trigger (hidden above) and its sheet (position: fixed, so it escapes) but
+   takes the li's own 50px away. Otherwise the container stays 100px tall over
+   the video -- invisible, and eating every tap that lands on it. */
+:root[data-ui="mobile"] ul#navbar:not(.navbar-sections-open) div#navbar-sections > li {
+	display: contents;
+}
+
+:root[data-ui="mobile"] ul#navbar.navbar-sections-open div#navbar-sections > li > .menu-item {
+	display: flex;
+}
+
+/* A tile is the section's own trigger. Same element, same handler, same menu:
+   only the shape around it changes. */
+:root[data-ui="mobile"] div#navbar-sections > li {
+	float: none;
+	display: block;
+	background-color: var(--cs-navbar-default-bg);
+	/* A navbar item is 50px tall because a desktop navbar is one row of them.
+	   A tile is a column -- icon over label, and the label wraps -- which needs
+	   76px, and the 50px box does not clip it: it PAINTS PAST ITS OWN BORDER,
+	   over the tile below. The row is as tall as what is in it. */
+	height: auto;
+}
+
+:root[data-ui="mobile"] div#navbar-sections > li > .menu-item {
+	/* `display` is the OPEN/CLOSED state and is set by the two rules above --
+	   setting it here as well would win on source order and the tiles would be
+	   on screen with the grid shut. */
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	/* Not 100%: a percentage against a parent that is itself sizing to this
+	   element resolves to auto anyway, and it read as a fixed height that the
+	   label then overflowed. Both boxes follow the content; the minimum is the
+	   touch target, not the layout. */
+	height: auto;
+	min-height: 60px;
+	padding: 8px 4px;
+	white-space: normal;
+	text-align: center;
+}
+
+/* Every item is sized for a fingertip, not for a mouse. */
+:root[data-ui="mobile"] ul#navbar li .menu-item {
+	padding-left: 8px;
+	padding-right: 8px;
+	gap: 6px;
+	font-size: 13px;
+	min-width: 44px;
+	justify-content: center;
+}
+:root[data-ui="mobile"] ul#navbar li a.menu-item img.svg-gray {
+	height: 18px;
+}
+:root[data-ui="mobile"] ul#navbar li .menu-item img {
+	height: 16px;
+}
+
+
+/* Compact-only tiles. #navbar-sections is display: contents on desktop, so
+   anything in it without this class is a desktop navbar item too. */
+li.navbar-compact-only {
+	display: none;
+}
+
+:root[data-ui="mobile"] div#navbar-sections > li.navbar-compact-only,
+:root[data-ui="mobile"] ul#navbar > li.navbar-compact-only {
+	display: block;
 }

@@ -22,9 +22,18 @@
 
 import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
+import {wm} from "../wm.js";
+import {UI_MOBILE} from "../ui.js";
+import {printText} from "./print.js";
+import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
 
-export function Keyboard(__recordWsEvent) {
+// An interactive keystroke that has not landed in fifteen seconds is not going
+// to, and every key behind it in the queue is waiting on it.
+const TYPING_TIMEOUT_MS = 15000;
+
+
+export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	var self = this;
 
 	/************************************************************************/
@@ -38,7 +47,13 @@ export function Keyboard(__recordWsEvent) {
 	var __el_magic = null;
 
 	var __init__ = function() {
+		// Built on the whole window, so it binds BOTH arrangements. Keypad
+		// resolves a code to every element carrying it, which is what keeps
+		// modifier state in step between the desktop and compact boards.
 		__keypad = new Keypad($("keyboard-window"), __sendKey);
+
+		__initLayers();
+		__initTyping();
 
 		$("hid-keyboard-led").title = "Keyboard free";
 
@@ -194,7 +209,66 @@ export function Keyboard(__recordWsEvent) {
 		}
 	};
 
+	// The typing bar owns the line being typed, so the scancode path must keep
+	// its hands off the keys that edit it.
+	//
+	// This handler is bound on the whole keyboard WINDOW, and the bar lives
+	// inside it -- so every key pressed in the bar was also going out as a
+	// scancode the instant it was pressed. Enter reached the host TWICE, and the
+	// immediate one arrived ahead of the characters it was meant to run; every
+	// other key was preventDefault()ed before it could enter the field at all,
+	// which is why a hardware keyboard could not type into the bar.
+	//
+	// A character, Backspace, Delete and Enter are part of the line and go
+	// through the bar's queue. Everything else -- Esc, Tab, the arrows, anything
+	// held with Ctrl/Alt/Meta -- is not, and still goes straight out, because
+	// Ctrl+C in a console is not optional.
+	// Which presses the bar swallowed, so their RELEASES are swallowed too.
+	//
+	// Focus can move between a keydown and its keyup -- press a key over the
+	// stream, then tap the bar, then let go -- and classifying each event by
+	// where it happens to land would send the press and eat the release, leaving
+	// that key held down on the host forever. The press decides; the release
+	// follows its own press.
+	var __bar_keys = new Set();
+
+	var __isTypingBarKey = function(ev, state) {
+		if (!state) {
+			return __bar_keys.delete(ev.code);
+		}
+		// AltGr is Ctrl+Alt on Windows and Linux, so testing those two flags
+		// alone refuses every AltGr character -- @ \\ [ ] { } ~ on a German,
+		// French or Nordic layout -- and sends it as a raw scancode for the
+		// HOST's layout to reinterpret, which is the second keymap the print
+		// path exists to avoid.
+		let altgr = (typeof ev.getModifierState === "function" && ev.getModifierState("AltGraph"));
+		let chord = (!altgr && (ev.ctrlKey || ev.altKey)) || ev.metaKey;
+		let mine = (
+			ev.target === $("hid-type-input")
+			&& typeof ev.key === "string"
+			&& !chord
+			// "Process" and "Unidentified" are a soft keyboard mid-composition:
+			// the field is the only thing that can say what the user meant.
+			//
+			// Delete is NOT here: the caret is pinned at the end of the field, so
+			// a forward delete changes nothing and fires no input event -- the bar
+			// would claim it and then never see it, and it reached the host by
+			// neither path.
+			&& (ev.key.length === 1
+				|| ["Enter", "Backspace", "Process", "Unidentified"].includes(ev.key))
+		);
+		if (mine) {
+			__bar_keys.add(ev.code);
+		} else {
+			__bar_keys.delete(ev.code);
+		}
+		return mine;
+	};
+
 	var __keyboardHandler = function(ev, state) {
+		if (__isTypingBarKey(ev, state)) {
+			return;
+		}
 		if (ev.code === "CapsLock") {
 			__syncCapsReload();
 		}
@@ -370,6 +444,309 @@ export function Keyboard(__recordWsEvent) {
 				__innerSendKey(code, state, true);
 			}
 		}
+	};
+
+	// ======================= native typing =======================
+	//
+	// The phone's own keyboard drives the host. Characters go through the
+	// server's keymap (api/hid/print) rather than being mapped to scancodes
+	// here, so swipe, dictation, long-press accents and autocorrect all work,
+	// and there is no second copy of every keymap in the browser. Editing
+	// intents that are not characters -- Backspace, Enter -- go out as ordinary
+	// key events, through the SAME queue, so they cannot overtake the text they
+	// follow.
+	//
+	// The field is a pipe, never a transcript: see typing.js. It holds the word
+	// an IME is still composing and nothing else, because everything before that
+	// has already reached the host.
+
+	var __typed = "";
+	var __composing = false;
+	var __queue = null;
+	var __reset_timer = null;
+	var __failed_timer = null;
+	var __exitTyping = null;
+	var __blur_timer = null;
+
+	var __initTyping = function() {
+		let el = $("hid-type-input");
+		if (el === null) {
+			return; // Desktop pages do not render the typing bar
+		}
+
+		__queue = makeTypingQueue({
+			"print": function(text, keymap, done) {
+				// Work queued before the HID was muted must not leak out after it.
+				if ($("hid-mute-switch").checked) {
+					done(true, null);
+					return;
+				}
+				printText(text, keymap, 0, function(http) {
+					if (http.status === 200) {
+						// The Text menu records its prints; a recording made through
+						// the bar that held the Enters and none of the text would
+						// replay a bare Enter into whatever is on screen.
+						__recordPrintEvent(text, keymap, 0);
+					}
+					done(http.status === 200, http);
+				}, TYPING_TIMEOUT_MS);
+			},
+			"sendKey": function(code, state) {
+				// Reports DELIVERABILITY, not whether anything was sent: a muted
+				// HID is a deliberate silence, an unreachable one is a failure.
+				//
+				// ⚠ It cannot yet tell the difference, so it always claims success.
+				// Answering it properly means reading __online -- which covers the
+				// bigger hole that api/hid/print returns 200 whether or not kvmd
+				// could deliver anything -- AND an instrument that can put a page
+				// with no kvmd behind it back "online", or the refusal ships with
+				// no test that can ever make it fire. Both are Phase 8; the queue's
+				// side of it is implemented and covered.
+				__sendKey(code, state);
+				return true;
+			},
+			"getKeymap": function() {
+				// The Text menu already owns the keymap chooser; reuse it
+				// rather than offering a second one that could disagree.
+				let el_km = $("hid-pak-keymap-selector");
+				return ((el_km !== null && el_km.value) ? el_km.value : "en-us");
+			},
+			"onError": function(why) {
+				if (why === null) {
+					return; // A deliberate drop, not a failure
+				}
+				if (why.what === "print") {
+					// The body can hold what the user typed, so it is not logged.
+					tools.error("Keyboard: typing failed with HTTP", why.http.status);
+				} else {
+					tools.error("Keyboard: typing failed: the HID connection is down");
+				}
+				// Anything still queued has been dropped, and on a phone the video
+				// is the only other evidence -- so say so where the user is looking.
+				el.setAttribute("data-failed", "1");
+				if (__failed_timer !== null) {
+					clearTimeout(__failed_timer);
+				}
+				__failed_timer = setTimeout(function() {
+					__failed_timer = null;
+					el.removeAttribute("data-failed");
+				}, 2000);
+			},
+		});
+
+		// While the system keyboard is up, the scancode layers are redundant --
+		// Android already has the letters -- and they are eating the screen. Only
+		// what a phone keyboard CANNOT send stays: Esc, the modifiers, Tab and
+		// the arrows. The layer picker stays too, so the full board is one tap
+		// away; tapping it dismisses the system keyboard.
+		// On a phone this window is opened to TYPE far more often than to send a
+		// scancode, and the bar that starts that sits BELOW the whole board --
+		// which is exactly why it gets missed. Opening straight into typing mode
+		// puts the phone's own keyboard up with only the keys it cannot send
+		// above it. The layer picker still expands the full board in one tap.
+		let el_win = $("keyboard-window");
+		if (el_win !== null) {
+			el_win.show_hook = function() {
+				if (document.documentElement.getAttribute("data-ui") === UI_MOBILE) {
+					el.focus();
+				}
+			};
+		}
+
+		el.addEventListener("focus", function() {
+			if (__blur_timer !== null) {
+				clearTimeout(__blur_timer);
+				__blur_timer = null;
+			}
+			// The padding only has to exist while a soft keyboard is looking at
+			// the field. Installing it on focus keeps the field genuinely empty
+			// the rest of the time, which is what lets the placeholder render.
+			__resetField(el);
+			document.documentElement.setAttribute("data-typing", "1");
+			wm.organizeAllWindows();
+		});
+		__exitTyping = function() {
+			// An explicit layer choice is not the momentary blur the debounce
+			// below exists to absorb, so it leaves typing mode at once. Waiting
+			// out the 200ms meant the board did not come back on the tap that
+			// asked for it, which is the whole of "one tap away".
+			if (__blur_timer !== null) {
+				clearTimeout(__blur_timer);
+				__blur_timer = null;
+			}
+			el.blur();
+			document.documentElement.removeAttribute("data-typing");
+			wm.organizeAllWindows();
+		};
+
+		el.addEventListener("blur", function(ev) {
+			__clearField(el);
+			// Typing mode is a MODE, not a shadow of where focus happens to be.
+			// Focus moving to another CONTROL is not a decision to leave it:
+			// tapping the mouse button in this window's own header blurred the
+			// bar, so 200ms later the full scancode board unfolded over the
+			// pad the user had just asked for -- reported from a phone as
+			// "i click mouse and it opens full on screen pikvm keyboard".
+			// relatedTarget is null only when focus went NOWHERE, which is what
+			// dismissing the system keyboard does; then the board is welcome
+			// back, because the space it was making way for has gone.
+			if (ev.relatedTarget !== null) {
+				return;
+			}
+			// Pressing a key in the strip must not collapse and re-expand the
+			// sheet under the user's finger, so a momentary blur is ignored.
+			__blur_timer = setTimeout(function() {
+				__blur_timer = null;
+				document.documentElement.removeAttribute("data-typing");
+				wm.organizeAllWindows();
+			}, 200);
+		});
+
+		// An IME composes a word in place, firing an input event per character.
+		// Those are forwarded like any other edit: the host has to track the
+		// finger, not lag a word behind it. Suppressing them until the word
+		// committed is what made the field disagree with the console -- the
+		// letters sat in the box, the console stayed blank, and a delete inside
+		// the word reached the host as nothing at all.
+		//
+		// What composition DOES gate is the reset: the field is the IME's own
+		// workspace until it commits, so it is left alone until then.
+		el.addEventListener("compositionstart", function() {
+			__composing = true;
+		});
+		el.addEventListener("compositionend", function() {
+			__composing = false;
+			if (document.activeElement !== el) {
+				// Blur and compositionend arrive in either order depending on the
+				// engine. Blink commits first, so this is unreachable there -- but
+				// the other way round the field has already been emptied, and
+				// decoding against that would type the abandoned word at the host
+				// and re-pad a blurred field so its placeholder never came back.
+				return;
+			}
+			// Engines disagree about whether the final input event comes before
+			// or after this one, so both paths decode. Whichever runs second
+			// sees no change and emits nothing.
+			__onEdit(el, null);
+		});
+		el.addEventListener("input", function(ev) {
+			__onEdit(el, ev.inputType);
+		});
+		el.addEventListener("keydown", function(ev) {
+			// A chord is not the bar's: __isTypingBarKey lets Ctrl/Alt/Meta+Enter
+			// through to the scancode path, so handling it here too sent Enter
+			// TWICE -- the immediate copy ahead of its own text, which is the
+			// defect this phase exists to fix, gated behind a modifier.
+			if (ev.key === "Enter" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+				// preventDefault stops the single-line field submitting, and is
+				// why no input event follows this to double the Enter.
+				ev.preventDefault();
+				if (!$("hid-mute-switch").checked) {
+					// Queued, not sent: Enter runs the command, so it must not
+					// reach the host before the characters of that command do.
+					__queue.push([{"key": "Enter", "n": 1}]);
+				}
+				__composing = false;
+				__resetField(el);
+			}
+		});
+
+		// The way back to the full board while the system keyboard is up. The
+		// layer picker does this too, but it is a whole row of its own and in
+		// typing mode only one of its five buttons means anything.
+		tools.el.setOnClick($("hid-type-board"), function() {
+			if (__exitTyping !== null) {
+				__exitTyping();
+			}
+		});
+
+		tools.el.setOnClick($("hid-type-clear"), function() {
+			// Local only -- clears the field, never touches the host.
+			__resetField(el);
+			el.focus();
+		});
+	};
+
+	// The field is put back to its padding after every edit, so nothing
+	// accumulates in it. It happens on the next task rather than inside the
+	// handler: mutating the value a soft keyboard is mid-way through reading is
+	// how an IME ends up duplicating what it just inserted.
+	var __scheduleReset = function(el) {
+		if (__reset_timer !== null) {
+			return;
+		}
+		__reset_timer = setTimeout(function() {
+			__reset_timer = null;
+			if (__composing) {
+				return; // The IME still owns the field; compositionend reschedules
+			}
+			__resetField(el);
+		}, 0);
+	};
+
+	var __resetField = function(el) {
+		el.value = PAD;
+		__typed = PAD;
+		// Programmatic assignment fires no input event, so this cannot loop.
+		el.setSelectionRange(PAD.length, PAD.length);
+	};
+
+	var __clearField = function(el) {
+		// Composition state is otherwise cleared ONLY by compositionend, and an
+		// Android tab frozen mid-word never fires one -- leaving __composing
+		// latched, every later reset skipped, and the field back to being the
+		// accumulating transcript this phase set out to delete.
+		__composing = false;
+		__bar_keys.clear();
+		// A reset still pending from the last edit would put the padding back
+		// after this, and a field that is not empty renders no placeholder -- so
+		// leaving typing mode would leave an empty-looking box with no hint in it.
+		if (__reset_timer !== null) {
+			clearTimeout(__reset_timer);
+			__reset_timer = null;
+		}
+		el.value = "";
+		__typed = "";
+	};
+
+	var __onEdit = function(el, input_type) {
+		let was = __typed;
+		let now = el.value;
+		__typed = now;
+		__scheduleReset(el);
+		if ($("hid-mute-switch").checked) {
+			return;
+		}
+		__queue.push(decodeEdit({"was": was, "now": now, "input_type": input_type}));
+	};
+
+	// The compact board shows one layer at a time. Desktop ignores this
+	// entirely -- it shows every key at once and the picker is not rendered.
+	var __setLayer = function(layer) {
+		let el_keypad = $("keyboard-compact");
+		if (el_keypad === null) {
+			return;
+		}
+		el_keypad.setAttribute("data-layer", layer);
+		tools.storage.set("hid.keyboard.layer", layer);
+		for (let el_bt of $$$("[data-keypad-layer-button]")) {
+			let on = (el_bt.getAttribute("data-keypad-layer-button") === layer);
+			el_bt.setAttribute("aria-pressed", String(on));
+		}
+	};
+
+	var __initLayers = function() {
+		for (let el_bt of $$$("[data-keypad-layer-button]")) {
+			tools.el.setOnClick(el_bt, function() {
+				// Choosing a layer means you want the scancode board, so let go
+				// of the typing field and put the system keyboard away.
+				if (__exitTyping !== null) {
+					__exitTyping();
+				}
+				__setLayer(el_bt.getAttribute("data-keypad-layer-button"));
+			});
+		}
+		__setLayer(tools.storage.get("hid.keyboard.layer", "abc"));
 	};
 
 	var __innerSendKey = function(code, state, allow_finish) {

@@ -26,13 +26,20 @@ div.start-box {
 	justify-content: center;
 	align-items: center;
 	text-align: center;
-	min-height: 100vh;
+	min-height: 100dvh;
+	box-sizing: border-box;
+	/* A gutter at every width, and room for a notch in landscape. */
+	padding: 16px calc(16px + env(safe-area-inset-right)) 16px calc(16px + env(safe-area-inset-left));
 }
 
 div.start-box div.start {
 	text-align: left;
 	outline: none;
 	word-wrap: break-word;
+	/* Without an explicit width this is shrink-to-fit, so one long line inside
+	   it (the keyboard-warning command) drags the whole card out to its cap and
+	   off the side of a phone. Fill the available space and cap it instead. */
+	width: 100%;
 	max-width: 800px;
 	border: var(--border-window-default-thin);
 	border-radius: 8px;

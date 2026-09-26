@@ -1,9 +1,8 @@
 li.right#system-dropdown
+	//- The link/video/keyboard/mouse LEDs are in #navbar-status now: they are
+	//- global status, not part of this section, and they made this the widest
+	//- button on the bar.
 	.menu-item.menu-button(href="#")
-		+navbar_led("link-led", "led-link")
-		+navbar_led("stream-led", "led-video")
-		+navbar_led("hid-keyboard-led", "led-hid-keyboard")
-		+navbar_led("hid-mouse-led", "led-hid-mouse")
 		span System
 
 	.hidden.menu#system-menu
@@ -98,6 +97,22 @@ li.right#system-dropdown
 					])
 
 		+menu_spoiler("Video quality settings")
+			//- Compact only. A 1920x1080 console on a 390px phone is 4.8px per
+			//- character, and the picture is pixels -- there is no font to make
+			//- bigger. This is where the view starts on every load, so nobody
+			//- has to zoom in again after each one.
+			table.kv#stream-zoom-row
+				tr
+					td Zoom the console by:
+					td.slider #[+menu_slider("stream-zoom-slider", "stream-zoom-value")]
+				//- Zoomed in, the prompt walks out of the bottom of the box
+				//- after enough output and you are typing blind. Nothing can be
+				//- asked where the cursor is -- there is only video -- so the
+				//- view follows whatever is CHANGING, which at an idle shell is
+				//- the blinking cursor itself.
+				tr
+					td Keep the cursor in view:
+					td #[+menu_switch("stream-follow-switch", true, true)]
 			table.kv
 				tr
 					td FPS limit:
@@ -167,6 +182,9 @@ li.right#system-dropdown
 				tr
 					td Mouse polling:
 					td.slider #[+menu_slider("hid-mouse-rate-slider", "hid-mouse-rate-value")]
+				tr
+					td Tap the screen to click:#[br]#[i (touchscreens; hold to right click)]
+					td #[+menu_switch("hid-mouse-tap-click-switch", true, true)]
 			.feature-disabled#hid-mouse-absolute
 				hr
 				table.kv

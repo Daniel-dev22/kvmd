@@ -103,3 +103,20 @@ div.switch-box input[type=checkbox]:disabled + label span.switch {
 	background: var(--cs-thumb-disabled-bg);
 	border: var(--border-default-2px);
 }
+
+
+/* =========================================================================
+   Layout and capability rules.
+
+   Three separate questions, never conflated into "is this a phone":
+     [data-ui="mobile"]      -- the compact LAYOUT (see share/js/ui.js)
+     @media (pointer: coarse) -- touch sizing, whatever the layout
+     @media (hover: hover)    -- affordances that need a hovering pointer
+   ========================================================================= */
+
+@media (hover: hover) {
+	div.switch-box label span.switch-inner:not(:disabled):hover::before,
+	div.switch-box label span.switch-inner:not(:disabled):hover::after {
+		background-color: var(--cs-control-hovered-bg);
+	}
+}

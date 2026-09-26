@@ -19,43 +19,32 @@
 #                                                                            #
 *****************************************************************************/
 
+// Typing text on the host, as opposed to pressing individual keys.
+//
+// The server owns the keymap: it turns characters into scancodes for whatever
+// layout the host is set to. Doing that mapping in the browser would mean a
+// second copy of every keymap, so both callers -- the Text menu and the compact
+// typing bar -- go through here.
 
-/* ===== keyboard.css ===== */
 
-div#keyboard-window {
-	visibility: visible !important;
-	padding-top: 9px !important;
-	padding-bottom: 30px !important;
-	border-bottom: 0 !important;
-	border-left: 0 !important;
-	border-right: 0 !important;
-	border-radius: 0 !important;
-	top: unset !important;
-	bottom: 0 !important;
-	width: 100% !important;
-	left: 50% !important;
-	-webkit-transform: translateX(-50%) !important;
-	transform: translateX(-50%) !important;
+import {tools} from "../tools.js";
+
+
+// delay is in SECONDS, matching the API. `timeout` is in MILLISECONDS,
+// matching tools.httpPost -- and it is the caller's to choose, because the two
+// callers are not alike. A paste types a whole document one key at a time and
+// may legitimately run for a long while; an interactive keystroke that has not
+// landed in seconds is not going to, and holding the queue open for it stalls
+// every key behind it.
+//
+// 📏 The old constant here was `7 * 24 * 3600` -- seconds written into a
+// milliseconds parameter, so what was meant as "a week" was 604800 ms, ten
+// minutes. Kept as the paste default so that caller is unchanged.
+export function printText(text, keymap, delay, on_done, timeout=(7 * 24 * 3600)) {
+	tools.httpPost(
+		"api/hid/print",
+		{"limit": 0, "keymap": keymap, "delay": delay},
+		on_done, text, "text/plain", timeout,
+	);
 }
 
-div#keyboard-window-header {
-	display: none !important
-}
-
-div#keyboard-desktop {
-	display: none !important;
-}
-
-div#keyboard-mobile {
-	display: block !important;
-}
-
-/* ===== Misc ===== */
-
-button#navbar-show-button {
-	display: none !important;
-}
-
-div#mouse-window button[data-wm-window-close] {
-	display: none !important;
-}

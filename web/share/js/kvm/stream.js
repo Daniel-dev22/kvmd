@@ -24,6 +24,7 @@
 
 
 import {tools, $} from "../tools.js";
+import {containFit} from "./zoom.js";
 import {wm} from "../wm.js";
 
 import {JanusStreamer} from "./stream_janus.js";
@@ -216,12 +217,8 @@ export function Streamer() {
 		// Так что теперь используются быстре рассчеты через offset*
 		// вместо getBoundingClientRect().
 		let res = __streamer.getResolution();
-		let ratio = Math.min(res.view_width / res.real_width, res.view_height / res.real_height);
 		return {
-			"x": Math.round((res.view_width - ratio * res.real_width) / 2),
-			"y": Math.round((res.view_height - ratio * res.real_height) / 2),
-			"width": Math.round(ratio * res.real_width),
-			"height": Math.round(ratio * res.real_height),
+			...containFit(res.real_width, res.real_height, res.view_width, res.view_height),
 			"real_width": res.real_width,
 			"real_height": res.real_height,
 		};

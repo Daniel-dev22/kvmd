@@ -196,7 +196,7 @@ export function Switch() {
 					<tr>
 						<td colspan="2"><textarea
 							id="__switch-edid-new-data-text" placeholder="Like 0123ABCD..."
-							style="min-width:350px"
+							style="min-width:min(350px,70vw)"
 						></textarea><td>
 				</table>
 			`;

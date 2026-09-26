@@ -26,7 +26,7 @@ div#navbar-stream-info {
 }
 
 div#stream-window {
-	min-width: 400px;
+	min-width: min(400px, 100vw);
 	min-height: 200px;
 }
 
@@ -44,6 +44,32 @@ div#stream-ocr-window {
 	padding: 0px !important;
 	background: radial-gradient(transparent 15%, black);
 }
+/* Out of flow, so the selection box above -- which is in flow, and sized by
+   javascript -- cannot push the controls off the bottom of the overlay. */
+div#stream-ocr-controls {
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+	display: flex;
+	gap: 10px;
+	cursor: default;
+}
+div#stream-ocr-controls button {
+	/* A finger, not a pointer: the desktop button height is 30px. */
+	min-height: 44px;
+	min-width: 44px;
+	padding: 0 16px;
+}
+/* These buttons sit on top of the surface the user is drawing on, and an
+   engine SWALLOWS the events over a disabled control rather than passing them
+   down -- so a drag that ended on the greyed-out Recognize button lost its
+   release, and with it the whole selection. Hit-testing straight through is
+   what a control that cannot be used should do anyway. */
+div#stream-ocr-controls button:disabled {
+	pointer-events: none;
+}
+
 div#stream-ocr-selection {
 	position: relative;
 	background-color: #5b90bb50;
@@ -55,10 +81,39 @@ div#stream-box {
 	height: 100%;
 	object-fit: contain;
 	position: relative;
+	/* Pinch to zoom belongs to the browser here: it is the only way to read a
+	   1920x1080 console on a 390px screen, where a character is 4.8px wide.
+	   `manipulation` on the body already allows it; naming it on the stream
+	   says that panning is NOT on offer, so a two-finger drag still reaches the
+	   handler that scrolls the host. */
+	touch-action: pinch-zoom;
+	/* A long press on the video is a right click on the HOST. Without this,
+	   iOS Safari answers it with its own "Save Image" callout over the stream
+	   -- the page prevents the touch default, but the callout is a separate
+	   opt-out. Reasoned from Apple's documented behaviour; not measured here,
+	   because nothing in this suite is an iPhone. */
+	-webkit-touch-callout: none;
 	display: inline-block;
 	border: var(--border-window-default-thin);
 	margin: -1px -1px -1px -1px; /* See pikvm/kvm#86, pikvm/pikvm#599 */
 }
+/* "Lift now and this is a right click." The keypad's latch learned first that a
+   500ms promotion with nothing on screen is not something a user can consent
+   to; this is the same warning, on the surface that presses buttons on somebody
+   else's server. An inset outline, so it cannot move the video by a pixel. */
+div.stream-box-click-armed::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2;
+	pointer-events: none;
+	outline: 3px solid var(--cs-key-holded-bg);
+	outline-offset: -3px;
+}
+
 div.stream-box-offline {
 	-webkit-filter: grayscale(100%) brightness(75%) sepia(75%);
 	filter: grayscale(100%) brightness(75%) sepia(75%);
@@ -107,4 +162,112 @@ canvas#stream-canvas {
 	object-fit: contain;
 	display: block;
 	background-color: black;
+}
+
+
+/* =========================================================================
+   Session chrome that differs by layout -- see share/js/ui.js.
+   ========================================================================= */
+
+/* These two live in the mouse window and only make sense in the compact
+   layout, where the navbar strip and the keyboard are toggled rather than
+   always on screen. */
+:root[data-ui="desktop"] button#mouse-window-navbar-button,
+:root[data-ui="desktop"] button#mouse-window-keyboard-button {
+	display: none;
+}
+
+/* The navbar's own show button stays hidden in compact -- the navbar is a
+   button and a grid there, always on screen, and this is the full-tab escape
+   hatch for the desktop layout.
+
+   🔴 The mouse window used to be hidden from closing by this same rule, on the
+   grounds that "in compact the mouse window is the persistent control surface:
+   the navbar is reached from it". That stopped being true two phases later --
+   Phase 5 made the pad open on demand and Phase 6 made the navbar one button
+   and a grid -- and nothing went back to check, because a rule that forbids
+   something suppresses the very action that would falsify it. What it left
+   behind was reported from the device as "there is no way to close mouse on
+   mobile when it opens". */
+/* The fit toggle is a compact affordance: on the desktop the whole console is
+   already on screen and there is nothing to fit. */
+:root[data-ui="desktop"] button#stream-fit-button {
+	display: none;
+}
+
+:root[data-ui="mobile"] button#stream-fit-button {
+	/* A WORD, not a glyph. ⤢ was tried and it reads as zoom or full screen --
+	   which is exactly what the two buttons beside it already do, and the
+	   opposite of what this one does. The label also carries the toggle's
+	   state, which no icon here could. */
+	line-height: 1;
+	font-size: 11px;
+	letter-spacing: 0.2px;
+}
+
+:root[data-ui="mobile"] button#navbar-show-button {
+	display: none;
+}
+
+
+
+/* =========================================================================
+   The terminal, scaled.
+
+   ttyd's terminal is somebody else's application in an iframe, and the only
+   thing we can ask it for is a font size on its URL. It reads one -- the parser
+   is right there in the build on the appliance -- and 18px and then 30px were
+   both reported from the phone as having no effect. So the size is taken here
+   instead, where nothing upstream gets a vote.
+
+   `transform`, not `zoom`. Both scale the iframe in Blink, and `zoom` also
+   halves the child's layout viewport there (measured: 193px inside a 386px
+   box). But a subframe is its own rendering context, and WebKit does not
+   propagate `zoom` into one -- which is exactly the shape of "it didn't zoom"
+   from a phone. A transform composites the rendered subframe, in every engine.
+
+   The iframe is laid out at half size and drawn at twice it, so it still fills
+   its window: the terminal is handed ~193px on a 390px phone, lays itself out
+   for that -- about 21 columns at xterm's own 15px default -- and every pixel
+   it draws lands at twice the size.
+   ========================================================================= */
+
+div#webterm-window iframe {
+	width: 100%;
+	flex: 1;
+	border: none;
+}
+
+:root[data-ui="mobile"] div#webterm-window {
+	--webterm-scale: 2.25;
+}
+
+:root[data-ui="mobile"] div#webterm-window iframe {
+	/* Half the box, drawn at twice the size, anchored to the top-left so the
+	   scale grows into the window rather than out of it. */
+	width: calc(100% / var(--webterm-scale));
+	height: calc(100% / var(--webterm-scale));
+	flex: 0 0 auto;
+	transform: scale(var(--webterm-scale));
+	transform-origin: top left;
+}
+
+
+/* The console zoom is a phone's answer to a 1920x1080 screen on 390px; a
+   desktop has the room and does not need the setting cluttering its menu. */
+table#stream-zoom-row {
+	display: none;
+}
+
+:root[data-ui="mobile"] table#stream-zoom-row {
+	display: table;
+}
+
+/* The picture is what zooms -- not the box, and not the overlays on top of it
+   (the OCR selection, the magic-key hint), which are positioned in the box's
+   own coordinates and would be dragged off with it. */
+div#stream-box > img#stream-image,
+div#stream-box > video#stream-video,
+div#stream-box > canvas#stream-canvas {
+	transform-origin: top left;
 }

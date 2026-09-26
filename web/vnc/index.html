@@ -25,7 +25,22 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>PiKVM VNC Info</title>
+    <script>
+      (function() {
+      	var pref = null;
+      	try {
+      		pref = window.localStorage.getItem("page.ui.type");
+      	} catch (ex) {
+      		pref = null; // Storage can be blocked; auto is the right fallback
+      	}
+      	var compact = window.matchMedia("(max-width: 63.999rem), (pointer: coarse)").matches;
+      	var mode = ((pref === "desktop" || pref === "mobile") ? pref : (compact ? "mobile" : "desktop"));
+      	document.documentElement.setAttribute("data-ui", mode);
+      })();
+      
+    </script>
     <link rel="apple-touch-icon" sizes="180x180" href="../share/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="../share/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="../share/favicon-16x16.png">
