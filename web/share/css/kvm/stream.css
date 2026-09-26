@@ -177,10 +177,19 @@ canvas#stream-canvas {
 	display: none;
 }
 
-/* In compact the mouse window is the persistent control surface: the navbar
-   is reached from it, so it must not be closable. */
-:root[data-ui="mobile"] button#navbar-show-button,
-:root[data-ui="mobile"] div#mouse-window button[data-wm-window-close] {
+/* The navbar's own show button stays hidden in compact -- the navbar is a
+   button and a grid there, always on screen, and this is the full-tab escape
+   hatch for the desktop layout.
+
+   🔴 The mouse window used to be hidden from closing by this same rule, on the
+   grounds that "in compact the mouse window is the persistent control surface:
+   the navbar is reached from it". That stopped being true two phases later --
+   Phase 5 made the pad open on demand and Phase 6 made the navbar one button
+   and a grid -- and nothing went back to check, because a rule that forbids
+   something suppresses the very action that would falsify it. What it left
+   behind was reported from the device as "there is no way to close mouse on
+   mobile when it opens". */
+:root[data-ui="mobile"] button#navbar-show-button {
 	display: none;
 }
 

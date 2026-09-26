@@ -289,6 +289,39 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 		assert.ok(m.console >= 155, `only ${m.console}px of console visible; three rows left 62px`);
 	});
 
+	test("every docked window can be closed again", async () => {
+		// 🔴 Reported from the device: "there is no way to close mouse on mobile
+		// when it opens". The mouse window's close button was display:none in
+		// compact, on a rule whose stated reason -- "the navbar is reached from
+		// it" -- stopped being true two phases later. A rule that forbids
+		// something suppresses the action that would falsify it, so nothing
+		// went back to check.
+		const pg = await open("web/kvm/index.html", 390, 700, true, true);
+		const blocked = [];
+		for (const [section, win] of [["#mouse-section", "mouse-window"], ["#keyboard-section", "keyboard-window"]]) {
+			await pg.eval(`document.querySelector("${section} .menu-item").click()`);
+			await pg.eval("new Promise((r) => setTimeout(r, 300))");
+			const state = await pg.eval(`(() => {
+				const w = document.getElementById("${win}");
+				const btn = w.querySelector("[data-wm-window-close]");
+				if (btn === null) { return "no close button at all"; }
+				const b = btn.getBoundingClientRect();
+				if (b.height === 0 || b.width === 0) { return "close button is not rendered"; }
+				if (b.height < 40 || b.width < 40) { return "close button is only " + Math.round(b.width) + "x" + Math.round(b.height); }
+				const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+				if (!(hit === btn || btn.contains(hit))) { return "close button is covered"; }
+				btn.click();
+				return (document.getElementById("${win}").classList.contains("hidden")
+					? "ok" : "the close button did not close it");
+			})()`);
+			if (state !== "ok") {
+				blocked.push(`${win}: ${state}`);
+			}
+		}
+		await pg.close();
+		assert.deepEqual(blocked, [], `windows a finger cannot dismiss: ${JSON.stringify(blocked)}`);
+	});
+
 	test("every visible key and layer button is touchable", async () => {
 		const pg = await openKeyboard();
 		const blocked = await pg.eval(hitTest("#keyboard-compact .key, #keyboard-layers button, #hid-type-clear"));
