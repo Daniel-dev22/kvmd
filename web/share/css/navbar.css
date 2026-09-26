@@ -321,6 +321,34 @@ ul.navbar-bg-tips li a {
 	padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* The way out of a sheet. Desktop dropdowns close by clicking away from them
+   and have a cursor to do it with; a phone has neither, and the sheet covers
+   the thing you would tap to dismiss it. STICKY, so a long sheet that has been
+   scrolled still has its exit on screen -- the one place you most need it. */
+div.menu div.menu-dismiss {
+	display: none;
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu div.menu-dismiss {
+	display: flex;
+	justify-content: flex-end;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background-color: var(--cs-navbar-default-bg);
+	border-bottom: var(--border-menu-item-content-top-thin);
+}
+
+:root[data-ui="mobile"] ul#navbar li div.menu div.menu-dismiss button {
+	min-width: 48px;
+	min-height: 48px;
+	border: none;
+	background: none;
+	color: var(--cs-navbar-default-fg);
+	font-size: 26px;
+	line-height: 1;
+}
+
 /* A table is not a block: it shrink-to-fits, so it has to be told to stretch.
    `width: 100%` is the wrong instruction -- a percentage resolves against the
    containing block and the element's own margins are then added OUTSIDE it. So

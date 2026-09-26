@@ -42,6 +42,7 @@ function __WindowManager() {
 		for (let el of $$("menu-button")) {
 			let el_menu = el.parentElement;
 			el_menu.querySelector(".menu").tabIndex = -1;
+			__addMenuDismiss(el_menu.querySelector(".menu"));
 			tools.el.setOnDown(el, () => __toggleMenu(el));
 			el_menu.addEventListener("keyup", function(ev) {
 				if (ev.code === "Escape") {
@@ -562,6 +563,33 @@ function __WindowManager() {
 			// The sheet that just opened IS the answer to the grid.
 			self.setSectionsOpen(false);
 		}
+	};
+
+	// Every sheet gets a way out of it.
+	//
+	// Injected here rather than written into each section's template: there are
+	// eight of them in six files and a ninth would forget. Reported from a
+	// phone as "none of the menu popup have an X" -- they close by tapping the
+	// navbar button again or by tapping the video behind them, and neither of
+	// those is visible.
+	//
+	// It carries data-wm-menu-force-hide, which is the mechanism this file
+	// already uses for a control inside a menu that should dismiss it, rather
+	// than a second path that could disagree with the first.
+	var __addMenuDismiss = function(el_menu) {
+		if (el_menu === null || el_menu.querySelector(".menu-dismiss") !== null) {
+			return;
+		}
+		let el_row = document.createElement("div");
+		el_row.className = "menu-dismiss";
+		let el_bt = document.createElement("button");
+		el_bt.type = "button";
+		el_bt.setAttribute("data-wm-menu-force-hide", "");
+		el_bt.setAttribute("aria-label", "Close");
+		el_bt.title = "Close";
+		el_bt.innerHTML = "&times;";
+		el_row.appendChild(el_bt);
+		el_menu.insertBefore(el_row, el_menu.firstChild);
 	};
 
 	var __closeAllMenues = function() {

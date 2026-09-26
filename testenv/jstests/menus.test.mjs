@@ -766,3 +766,79 @@ describe("a finger can work the menus", {"skip": chromiumPath() ? false : "no ch
 		assert.deepEqual(small, [], `menu buttons under ${MIN_TARGET}px tall:\n  ${small.join("\n  ")}`);
 	});
 });
+	// ===================================================================
+	// The dismissal and bounds contract.
+	//
+	// Reported from a phone: "none of the menu popup have an X and some like
+	// drive dont even scroll". A desktop dropdown closes by clicking away from
+	// it, with a cursor to do it with. A phone has neither, and the sheet
+	// covers the thing you would tap to dismiss it.
+	//
+	// This asserts the contract for EVERY sheet rather than for the ones that
+	// were reported, so a sheet added later inherits it.
+	// ===================================================================
+
+	test("every sheet can be dismissed, and its exit survives being scrolled", async () => {
+		const pg = await open(390, 700);
+		const bad = await pg.eval(`(async () => {
+			const settle = () => new Promise((r) => setTimeout(r, 80));
+			const out = [];
+			for (const bt of document.querySelectorAll(".menu-button")) {
+				const menu = bt.parentElement.querySelector(".menu");
+				if (menu === null) { continue; }
+				const name = (bt.textContent || bt.parentElement.id || "?").trim().slice(0, 20);
+				bt.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+				const box = menu.getBoundingClientRect();
+				if (box.height === 0) {
+					// Not populated without a backend; nothing to assert here.
+					bt.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+					continue;
+				}
+				const x = menu.querySelector(".menu-dismiss button");
+				if (x === null) { out.push(name + ": no way out"); }
+				else {
+					// Bounded: a sheet may never grow past the viewport with
+					// content that cannot be reached.
+					if (menu.scrollHeight > menu.clientHeight + 1
+						&& getComputedStyle(menu).overflowY !== "auto"
+						&& getComputedStyle(menu).overflowY !== "scroll") {
+						out.push(name + ": " + (menu.scrollHeight - menu.clientHeight) + "px unreachable and no scroll");
+					}
+					// Reachable, finger-sized, and STILL THERE once scrolled --
+					// the exit has to survive the case you most need it in.
+					menu.scrollTop = menu.scrollHeight;
+					const b = x.getBoundingClientRect();
+					const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+					if (b.width < 44 || b.height < 44) {
+						out.push(name + ": exit is " + Math.round(b.width) + "x" + Math.round(b.height));
+					} else if (b.top < box.top - 1 || b.bottom > box.bottom + 1) {
+						out.push(name + ": exit scrolled out of the sheet");
+					} else if (!(hit === x || x.contains(hit))) {
+						out.push(name + ": exit is covered");
+					} else {
+						// mouseup, not click: wm.js dismisses menus from a
+						// window-level mouseup/touchend handler, so a
+						// synthetic click drives an event the app never
+						// listens to and every sheet reads as broken.
+						x.dispatchEvent(new MouseEvent("mouseup", {bubbles: true}));
+						// wm.js DEFERS the dismissal through a setTimeout ("we
+						// postpone the handling" -- a touchend on Chrome does
+						// not arrive otherwise), so checking synchronously
+						// reads every sheet as broken.
+						await settle();
+						if (!menu.classList.contains("hidden")) {
+							out.push(name + ": the exit did not close it");
+						}
+					}
+				}
+				if (!menu.classList.contains("hidden")) {
+					bt.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+					await settle();
+				}
+			}
+			return out;
+		})()`);
+		await pg.close();
+		assert.deepEqual(bad, [], `sheets that trap the user: ${JSON.stringify(bad)}`);
+	});
+
