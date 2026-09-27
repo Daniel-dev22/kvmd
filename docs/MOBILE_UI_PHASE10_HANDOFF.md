@@ -3,7 +3,8 @@
 **Branch:** `feat/switches-reach-every-writer` off `master` (fork `Daniel-dev22/kvmd`, `origin`),
 worktree `/docker_container_volumes/kvmd-phase10`.
 **Range:** `39027ec2` (the Phase 9 merge) … this document's own commit.
-**Status:** committed and pushed. **NOT deployed** — the kd appliance is still running Phase 8
+**Status:** committed, pushed, and merged into `master` with `--no-ff` as `a91d75f4`.
+**NOT deployed** — the kd appliance is still running Phase 8
 (`31511d9d`); Phase 9 was merged and never deployed either, so a deploy now ships **two** phases.
 Read the release-scope note under *Traps*.
 **Read first:** `MOBILE_UI_PHASE9_HANDOFF.md`, then this.
