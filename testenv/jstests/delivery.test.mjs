@@ -14,7 +14,7 @@
 import test, {before, after, describe} from "node:test";
 import assert from "node:assert/strict";
 import {read, jsFiles} from "./helpers.mjs";
-import {serveWeb, launchBrowser, chromiumPath, centre, classOf, tap} from "./browser.mjs";
+import {serveWeb, launchBrowser, chromiumPath, centre, classOf, tap, waitOnline} from "./browser.mjs";
 
 const KVM = "kvm/index.html";
 
@@ -34,29 +34,6 @@ test("a browser is available to reach the host", () => {
 	assert.ok(chromiumPath(),
 		"no chromium binary found -- the delivery suite cannot run and every assertion below is skipped");
 });
-
-// The LED is the page's own answer to "can this keyboard reach the host", and
-// it distinguishes all three states in its title: free/captured (online),
-// "emulator offline" (the whole HID is gone) and "inactive/busy" (the gadget
-// is not enumerated). Waiting on it means a test never types into a page that
-// has not finished connecting -- which would measure the offline path by
-// accident and pass for the wrong reason.
-const KBD_TITLE = `document.getElementById("hid-keyboard-led").title`;
-const LINK = `document.getElementById("link-led").className`;
-
-async function waitOnline(pg, ms = 5000) {
-	const until = Date.now() + ms;
-	for (;;) {
-		const [link, title] = [await pg.eval(LINK), await pg.eval(KBD_TITLE)];
-		if (link === "led-green" && !title.includes("offline") && !title.includes("inactive")) {
-			return;
-		}
-		if (Date.now() > until) {
-			throw new Error(`the page never came online: link=${link} keyboard=${title}`);
-		}
-		await new Promise((done) => setTimeout(done, 50));
-	}
-}
 
 async function open({session = true, width = 390, height = 844} = {}) {
 	const pg = await browser.newPage();
@@ -187,6 +164,115 @@ describe("a latched modifier never rewrites what is typed", {"skip": chromiumPat
 	});
 });
 
+const STATUS = `document.getElementById("hid-type-status").innerText`;
+const FAILED = `document.getElementById("hid-type-input").hasAttribute("data-failed")`;
+
+// The message is shown for four seconds and then cleared, so a test reads it
+// as soon as it appears rather than after a fixed sleep that may land after it.
+async function saidWithin(pg, ms = 3000) {
+	const until = Date.now() + ms;
+	for (;;) {
+		const said = await pg.eval(STATUS);
+		if (said !== "" || Date.now() > until) {
+			return said;
+		}
+		await new Promise((done) => setTimeout(done, 50));
+	}
+}
+
+describe("the bar never claims a keystroke it could not deliver", {"skip": chromiumPath() ? false : "no chromium"}, () => {
+	test("with the link down nothing is typed, and it says so", async () => {
+		// 🔴 What this closes: the bar reported success whatever happened. The
+		// socket can be gone while HTTP still works, and then the text lands
+		// while the Backspace that belongs with it is dropped -- `helo` plus a
+		// correction arriving as `helolo`.
+		const pg = await open();
+		await showKeyboard(pg);
+		server.dropSession();
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+
+		await pg.commit("ls");
+		await pg.key("Backspace", "Backspace", 8);
+		const said = await saidWithin(pg);
+		const host = await server.waitHost(0, 400);
+		const failed = await pg.eval(FAILED);
+		await pg.close();
+
+		assert.deepEqual(host, [], `nothing may reach the host with no link: ${JSON.stringify(host)}`);
+		assert.match(said, /no connection/i, `the bar has to say what happened, got ${JSON.stringify(said)}`);
+		assert.ok(failed, "and the field has to show it too, for anyone not reading the line");
+	});
+
+	test("with the gadget unenumerated it says so -- and still types", async () => {
+		// api/hid/print answers 200 whether or not kvmd could deliver a single
+		// scancode, so the page has to say this itself.
+		//
+		// 🔴 And it must NOT refuse. `keyboard.online` is an inference from
+		// kvmd's state stream; if it is ever wrong, refusing would leave a user
+		// unable to type at all to prevent an over-optimistic message, while
+		// sending under a wrong inference costs nothing -- kvmd discards it
+		// exactly as it would have.
+		const pg = await open();
+		await showKeyboard(pg);
+		server.setHid({"keyboard": {"online": false}});
+		await pg.eval("new Promise((r) => setTimeout(r, 300))");
+
+		await pg.commit("ls");
+		const said = await saidWithin(pg);
+		const host = await server.waitHost(1);
+		await pg.close();
+
+		assert.match(said, /offline/i, `got ${JSON.stringify(said)}`);
+		assert.equal(prints(host), "ls",
+			`the text must still go out: a wrong guess about the HID must not disable typing (${JSON.stringify(host)})`);
+	});
+
+	test("with everything ready it says nothing at all", async () => {
+		// The negative control for both messages above: a bar that always
+		// complained would pass them and be useless.
+		const pg = await open();
+		await showKeyboard(pg);
+		await pg.commit("ls");
+		await server.waitHost(1);
+		const [said, failed] = [await pg.eval(STATUS), await pg.eval(FAILED)];
+		await pg.close();
+		assert.equal(said, "", "a working keystroke must not be reported as a problem");
+		assert.equal(failed, false);
+	});
+
+	test("a server error is named, not translated into a colour", async () => {
+		const pg = await open();
+		await showKeyboard(pg);
+		server.control.printStatus = 413;
+		await pg.commit("ls");
+		const said = await saidWithin(pg);
+		await pg.close();
+		assert.match(said, /413/, `the status has to reach the user: got ${JSON.stringify(said)}`);
+	});
+
+	test("a reconnect does not inherit the last session's answer", async () => {
+		// The state is remembered per KEYBOARD, not per socket, so a HID that
+		// went offline while the page was away used to read as ready for the
+		// round trip between the socket opening and the first state event --
+		// and on a link that flaps, that window is where the typing happens.
+		const pg = await open();
+        await showKeyboard(pg);
+		server.control.hidSnapshot = false; // Connected, and told nothing
+		server.dropSession();
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		server.control.session = true;
+		await pg.eval("new Promise((r) => setTimeout(r, 1500))");
+		assert.equal(await pg.eval(`document.getElementById("link-led").className`), "led-green",
+			"precondition: the page has to be connected again, or this measures the link instead");
+
+		await pg.commit("ls");
+		const said = await saidWithin(pg);
+		await pg.close();
+		assert.match(said, /offline/i,
+			`an unanswered HID is not a ready one: got ${JSON.stringify(said)}`);
+	});
+});
+
 describe("one way to type, and it cannot be bypassed", () => {
 	test("nothing posts to api/hid/print except print.js", async () => {
 		// The rule above is enforced in one place, so a fourth caller cannot
@@ -203,9 +289,28 @@ describe("one way to type, and it cannot be bypassed", () => {
 		}
 	});
 
-	test("the releaser is registered by whoever owns the board", () => {
-		const kb = read("web/share/js/kvm/keyboard.js");
-		assert.match(kb, /setHeldKeyReleaser\(self\.releaseAll\)/,
-			"print.js refuses to type with no releaser registered; keyboard.js is what registers it");
+	test("typing refuses outright when nothing owns the board", {"skip": chromiumPath() ? false : "no chromium"}, async () => {
+		// Both directions in one, because a strictness fix cannot be falsified
+		// by the code it guards: the page AS SHIPPED prints (something did
+		// register a releaser), and with the registration taken away printText
+		// throws rather than quietly typing under whatever is latched.
+		const pg = await open({"session": false});
+		const out = await pg.eval(`(async () => {
+			const m = await import("/share/js/kvm/print.js");
+			try {
+				m.printText("", null, null, () => {});
+			} catch (ex) {
+				return "the shipped page has no releaser: " + ex.message;
+			}
+			m.setHeldKeyReleaser(null);
+			try {
+				m.printText("", null, null, () => {});
+			} catch (ex) {
+				return "refused";
+			}
+			return "typed with nobody holding the board";
+		})()`);
+		await pg.close();
+		assert.equal(out, "refused");
 	});
 });

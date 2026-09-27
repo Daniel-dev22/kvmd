@@ -10,7 +10,7 @@
 
 import test, {before, after, describe} from "node:test";
 import assert from "node:assert/strict";
-import {serveWeb, launchBrowser, chromiumPath} from "./browser.mjs";
+import {serveWeb, launchBrowser, chromiumPath, waitOnline} from "./browser.mjs";
 
 const KVM = "kvm/index.html";
 
@@ -103,7 +103,13 @@ async function openTyping() {
 	await pg.setTouch(true, 5);
 	await pg.clearStorage(server.origin);
 	server.reset();
+	// The bar refuses to type when the page can see that nothing can reach the
+	// host -- so this suite needs a host. Until Phase 9 these tests ran against
+	// a page with no kvmd behind it at all, measuring a bar that claimed
+	// success for keystrokes the socket could never have carried.
+	server.control.session = true;
 	await pg.goto(`${server.origin}/${KVM}?debug=1`);
+	await waitOnline(pg);
 	await pg.eval(`document.getElementById("mouse-window-keyboard-button").click()`);
 	await pg.eval("new Promise((r) => setTimeout(r, 200))");
 	// The bar opens focused and padded, or nothing below is measuring the bar.

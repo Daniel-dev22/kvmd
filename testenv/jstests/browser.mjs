@@ -179,7 +179,10 @@ export async function serveWeb() {
 	// lay out, which is what nearly every test measures. A test that needs the
 	// page ONLINE turns it on BEFORE navigating -- or at any later moment, and
 	// the page's own reconnect loop picks it up within about a second.
-	const control = {"printStatus": 200, "printDelayMs": 0, "session": false};
+	// `hidSnapshot` is what kvmd does on connect -- the whole state, at once.
+	// A test can withhold it to measure what the page ASSUMES about a HID it
+	// has not been told anything about yet.
+	const control = {"printStatus": 200, "printDelayMs": 0, "session": false, "hidSnapshot": true};
 	let hid = hidState();
 	const sockets = new Set();
 
@@ -281,7 +284,9 @@ export async function serveWeb() {
 		}));
 		// kvmd sends the whole state the moment the socket opens, so the page
 		// is never left guessing what it is connected to.
-		sendJson(sock, "hid", hid);
+		if (control.hidSnapshot) {
+			sendJson(sock, "hid", hid);
+		}
 		sendJson(sock, "hid_keymaps", {"keymaps": {"default": "en-us", "available": ["en-us", "de"]}});
 	});
 
@@ -330,6 +335,7 @@ export async function serveWeb() {
 			control.printStatus = 200;
 			control.printDelayMs = 0;
 			control.session = false;
+			control.hidSnapshot = true;
 			hid = hidState();
 			for (const sock of sockets) {
 				sock.destroy();
@@ -384,6 +390,29 @@ export async function tap(pg, point, hold = 0) {
 		await new Promise((done) => setTimeout(done, hold));
 	}
 	await pg.touch("touchEnd", []);
+}
+
+// Waits until the page has actually connected to the appliance stub and been
+// told its HID is ready.
+//
+// The keyboard LED is the page's own answer to "can this reach the host", and
+// its title distinguishes all three states: free/captured (ready), "emulator
+// offline" (no HID at all) and "inactive/busy" (the gadget is not enumerated).
+// Without waiting, a test types into a page that has not finished connecting
+// and measures the OFFLINE path by accident -- passing, for the wrong reason.
+export async function waitOnline(pg, ms = 5000) {
+	const until = Date.now() + ms;
+	for (;;) {
+		const link = await pg.eval(`document.getElementById("link-led").className`);
+		const kbd = await pg.eval(`document.getElementById("hid-keyboard-led").title`);
+		if (link === "led-green" && !kbd.includes("offline") && !kbd.includes("inactive")) {
+			return;
+		}
+		if (Date.now() > until) {
+			throw new Error(`the page never came online: link=${link} keyboard=${kbd}`);
+		}
+		await new Promise((done) => setTimeout(done, 50));
+	}
 }
 
 export async function launchBrowser() {

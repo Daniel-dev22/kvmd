@@ -32,6 +32,10 @@ import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 // to, and every key behind it in the queue is waiting on it.
 const TYPING_TIMEOUT_MS = 15000;
 
+// Long enough to READ. The old signal was a 2s border, and a border does not
+// have to be read.
+const PROBLEM_SHOWN_MS = 4000;
+
 
 export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	var self = this;
@@ -119,6 +123,12 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		if (ws !== __ws) {
 			self.releaseAll();
 			__ws = ws;
+			// Nothing is known about THIS session's HID until it says so, and
+			// the last one's answer is not an answer: kvmd sends the whole
+			// state the moment the socket opens, so this is unknown for about
+			// a round trip. Carrying the old value across a reconnect is how a
+			// gadget that went offline while we were away reads as ready.
+			__online = null;
 		}
 		__updateOnlineLeds();
 	};
@@ -473,6 +483,66 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	var __exitTyping = null;
 	var __blur_timer = null;
 
+	// Can a keystroke leave at all?
+	//
+	// A FACT, not an inference: __innerSendKey sends nothing without a socket,
+	// so a key is definitely lost -- and a key lost while the text around it
+	// still goes out over HTTP is not a dropped keystroke but a corrupted
+	// line, which is `helo` plus a correction arriving as `helolo`. Typing
+	// stops until the session's own reconnect loop (session.js, every ~1s)
+	// hands back a socket; that path does not run through here.
+	var __linkUp = () => (__ws !== null);
+
+	// Will the HID do anything with it if it does?
+	//
+	// An INFERENCE, from kvmd's own state stream: `keyboard.online` is false
+	// when the OTG gadget is not enumerated and `busy` is true during a reset,
+	// and in both cases kvmd accepts the report and discards it -- api/hid/print
+	// answers 200 either way, which is the whole reason the bar could claim
+	// success for a keystroke that never happened.
+	//
+	// 🔴 This deliberately does NOT stop the typing. If the inference is wrong
+	// -- a plugin whose `online` means something else, a state stream that has
+	// not caught up -- refusing would leave a user unable to type at all, with
+	// no way round it, to prevent a message being optimistic. Sending under a
+	// wrong inference costs nothing: kvmd discards it exactly as it would have.
+	// So it is REPORTED, not enforced.
+	var __hidReady = () => (__online === true);
+
+	// What happened to the keystrokes, in WORDS.
+	//
+	// A 2s red border was the whole signal before this: colour only, nothing
+	// for a screen reader, and nothing that says which of three things went
+	// wrong. It matters more here than on a desktop -- the queue drops whatever
+	// was behind a failure, the video is the only other evidence, and with the
+	// navbar collapsed into its button the keyboard LED is not even on screen.
+	var __sayTyping = function(text) {
+		let el = $("hid-type-input");
+		let el_status = $("hid-type-status");
+		if (el === null || el_status === null) {
+			return; // Desktop pages do not render the typing bar
+		}
+		el.setAttribute("data-failed", "1");
+		el_status.innerText = text;
+		if (__failed_timer !== null) {
+			clearTimeout(__failed_timer);
+		}
+		__failed_timer = setTimeout(function() {
+			__failed_timer = null;
+			el.removeAttribute("data-failed");
+			el_status.innerText = "";
+		}, PROBLEM_SHOWN_MS);
+	};
+
+	// Said when the page can see that the HID will throw the keystroke away.
+	// Fired per burst rather than once per session on purpose: it is the answer
+	// to "did that arrive?", asked at the moment the user asks it.
+	var __warnIfNotReady = function() {
+		if (!__hidReady()) {
+			__sayTyping("Emulator offline \u2014 this may not have arrived");
+		}
+	};
+
 	var __initTyping = function() {
 		let el = $("hid-type-input");
 		if (el === null) {
@@ -486,6 +556,14 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 					done(true, null);
 					return;
 				}
+				if (!__linkUp()) {
+					// HTTP can still be up while the socket is not, and then
+					// the text would land while the Backspace behind it was
+					// dropped. A null `info` says the page refused, not kvmd.
+					done(false, null);
+					return;
+				}
+				__warnIfNotReady();
 				printText(text, keymap, 0, function(http) {
 					if (http.status === 200) {
 						// The Text menu records its prints; a recording made through
@@ -497,6 +575,14 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				}, {"timeout": TYPING_TIMEOUT_MS});
 			},
 			"sendKey": function(code, state) {
+				// Reports DELIVERABILITY, not whether anything was sent: a
+				// muted HID is a deliberate silence, an unreachable one is a
+				// failure, and the queue needs to tell them apart to decide
+				// whether the text behind this key may still go out.
+				if (!__linkUp()) {
+					return false;
+				}
+				__warnIfNotReady();
 				// The board goes down for a key exactly as it does for text:
 				// Backspace under a latched Ctrl is delete-word in a shell, and
 				// Enter under it is not Enter. This is the other transport --
@@ -515,22 +601,18 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				if (why === null) {
 					return; // A deliberate drop, not a failure
 				}
-				if (why.what === "print") {
+				// A status only exists when kvmd answered. A key whose socket
+				// was gone, and a print the page refused for the same reason,
+				// both arrive here without one -- and both mean the link.
+				let status = ((why.what === "print" && why.http !== null) ? why.http.status : 0);
+				if (status > 0) {
 					// The body can hold what the user typed, so it is not logged.
-					tools.error("Keyboard: typing failed with HTTP", why.http.status);
+					tools.error("Keyboard: typing failed with HTTP", status);
+					__sayTyping(`Not sent \u2014 PiKVM error ${status}`);
 				} else {
 					tools.error("Keyboard: typing failed: the HID connection is down");
+					__sayTyping("Not sent \u2014 no connection to PiKVM");
 				}
-				// Anything still queued has been dropped, and on a phone the video
-				// is the only other evidence -- so say so where the user is looking.
-				el.setAttribute("data-failed", "1");
-				if (__failed_timer !== null) {
-					clearTimeout(__failed_timer);
-				}
-				__failed_timer = setTimeout(function() {
-					__failed_timer = null;
-					el.removeAttribute("data-failed");
-				}, 2000);
 			},
 		});
 
