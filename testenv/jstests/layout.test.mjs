@@ -872,3 +872,134 @@ describe("the terminal is zoomed for a phone, and only for a phone", {"skip": ch
 	});
 });
 
+
+describe("\"Hide input text\" covers every field that types", {"skip": chromiumPath() ? false : "no chromium available"}, () => {
+	// 🔴 What this closes: the switch masked the Text panel's box and nothing
+	// else, while the field a phone actually types into -- the compact typing
+	// bar, the one a password manager fills -- showed the password at 16px with
+	// the switch on. Both are doors into the same api/hid/print.
+
+	async function openBar(width = 390) {
+		const pg = await open("web/kvm/index.html", width, 844, true, true);
+		await pg.eval(`document.getElementById("mouse-window-keyboard-button").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		// Masking is measured on a FOCUSED field, because that is the only
+		// state in which it holds anything: blur empties it.
+		await pg.eval(`document.getElementById("hid-type-input").focus()`);
+		assert.equal(await pg.eval(`document.activeElement.id`), "hid-type-input",
+			"precondition: the bar has to have focus, or this measures an empty box");
+		return pg;
+	}
+
+	// Computed, not declared: a stylesheet can carry the rule and still lose to
+	// specificity or to an inline style, and the question here is what the
+	// screen does.
+	const MASKING = `(() => {
+		const bar = document.getElementById("hid-type-input");
+		const box = document.getElementById("hid-pak-text");
+		const cs = getComputedStyle(bar);
+		return {
+			"bar_colour": cs.color,
+			"bar_indent": cs.textIndent,
+			"bar_security": cs.webkitTextSecurity,
+			"box_security": getComputedStyle(box).webkitTextSecurity,
+		};
+	})()`;
+
+	// The switch is CLICKED rather than assigned: assigning `.checked` fires no
+	// event, so the binding that carries the preference onto the document would
+	// never run and every assertion below would measure the default.
+	const SECURE = (on) => `(() => {
+		const el = document.getElementById("hid-pak-secure-switch");
+		if (el.checked !== ${on ? "true" : "false"}) {
+			el.click();
+		}
+		return el.checked;
+	})()`;
+
+	test("off, neither field is masked; on, both are", async () => {
+		const pg = await openBar();
+		const before = await pg.eval(MASKING);
+		assert.equal(await pg.eval(SECURE(true)), true, "the switch did not take");
+		const after = await pg.eval(MASKING);
+		// Both arms, because a masking test that only ever looks at the ON
+		// state passes just as well against a field that is ALWAYS masked --
+		// and one that always hides what you type is its own defect.
+		assert.equal(await pg.eval(SECURE(false)), false, "the switch did not come back off");
+		const off_again = await pg.eval(MASKING);
+		await pg.close();
+
+		assert.equal(before.box_security, "none", "the panel's box starts unmasked");
+		assert.equal(after.box_security, "disc", "the panel's box has to mask with the switch on");
+		assert.equal(off_again.box_security, "none", "and unmask again");
+
+		assert.notEqual(before.bar_colour, "rgba(0, 0, 0, 0)", "the bar starts readable");
+		assert.equal(after.bar_colour, "rgba(0, 0, 0, 0)",
+			`the typing bar has to mask with the switch on, got ${after.bar_colour}`);
+		assert.notEqual(off_again.bar_colour, "rgba(0, 0, 0, 0)", "and be readable again");
+	});
+
+	test("what an IME is composing is taken off screen, marker and all", async () => {
+		// 📏 Found by looking at a PNG, which is the only thing that could:
+		// transparent text still leaves the engine's own composition marker --
+		// a filled block here, an underline on Android -- drawn to the WIDTH of
+		// the word. Every assertion about colour passed while the length of the
+		// password was on screen.
+		const pg = await openBar();
+		await pg.eval(SECURE(true));
+		const m = await pg.eval(MASKING);
+		await pg.close();
+		assert.equal(m.bar_indent, "-9999px",
+			`the composing word and its marker have to leave the box, got ${m.bar_indent}`);
+		assert.equal(m.bar_colour, "rgba(0, 0, 0, 0)",
+			"and the characters are hidden as well: neither is the other's fallback");
+	});
+
+	test("the bar is masked WITHOUT text-security, which would draw eight dots for nothing", async () => {
+		// 📏 The measurement behind the two mechanisms, pinned so that tidying
+		// them into one cannot pass. -webkit-text-security renders a disc per
+		// CHARACTER, and the bar's field holds eight zero-width padding
+		// characters whenever it has focus (typing.js, PAD) -- so the "obvious"
+		// unification shows a permanent ••••••••, standing for nothing, in a
+		// field where Backspace does not remove them: it sends a Backspace to
+		// the HOST instead, deleting something the user did not type.
+		const pg = await openBar();
+		await pg.eval(SECURE(true));
+		const m = await pg.eval(MASKING);
+		await pg.close();
+		assert.equal(m.bar_security, "none",
+			`the bar must not use text-security: its value is mostly padding, got ${m.bar_security}`);
+	});
+
+	test("an empty bar still shows its placeholder while the switch is on", async () => {
+		// The cost of indenting: an empty field would push its own placeholder
+		// off screen too, leaving a box with no hint in it for as long as
+		// secure mode is on. The rule is scoped to :focus, and blur empties the
+		// field -- so this is the test that the scope is still there.
+		const pg = await openBar();
+		await pg.eval(SECURE(true));
+		await pg.eval(`document.getElementById("hid-type-input").blur()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 300))");
+		const m = await pg.eval(`(() => {
+			const bar = document.getElementById("hid-type-input");
+			return {"indent": getComputedStyle(bar).textIndent, "value": bar.value};
+		})()`);
+		await pg.close();
+		assert.equal(m.value, "", "precondition: blur empties the field, which is why :focus is the scope");
+		assert.equal(m.indent, "0px",
+			`an unfocused field must keep its placeholder on screen, got indent ${m.indent}`);
+	});
+
+	test("the switch is one preference, not one per field", async () => {
+		// Two controls for one promise is how they come to disagree. There is
+		// one switch, it is the Text menu's, and what it covers is a stylesheet
+		// rule -- so a third masked field needs no second binding.
+		const pg = await openBar();
+		const switches = await pg.eval(`document.querySelectorAll('input[id*="secure"]').length`);
+		await pg.eval(SECURE(true));
+		const marked = await pg.eval(`document.documentElement.hasAttribute("data-hid-secure")`);
+		await pg.close();
+		assert.equal(switches, 1, `${switches} secure switches: the second one can disagree with the first`);
+		assert.equal(marked, true, "the preference is carried by one attribute on the document");
+	});
+});
