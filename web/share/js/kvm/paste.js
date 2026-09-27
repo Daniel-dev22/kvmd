@@ -142,7 +142,7 @@ export function Paste(__recorder) {
 					<br><br>${tools.escape(why)}: this may not arrive.
 				`);
 				wm.confirm(`
-					You're going to paste ${text.length} character${text.length ? "s" : ""}.<br>
+					You're going to paste ${text.length} character${text.length > 1 ? "s" : ""}.<br>
 					Are you sure you want to continue?${doubt}
 				`).then(function(ok) {
 					if (ok) {

@@ -427,9 +427,11 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 	});
 
 	test("muting after text is queued stops it reaching the host", async () => {
-		// __onEdit gates on mute before queueing, so the adapter's own check
-		// only matters for work queued BEFORE the switch flipped -- which no
-		// test exercised, and 📏 a build without it survived.
+		// Nothing gates on mute before queueing any more -- edits are decoded
+		// and queued whatever the switch says, and print.js refuses -- so this
+		// is now the ordinary path rather than the rare one it was written for.
+		// It still measures the thing that matters: work already IN the queue
+		// when the switch flipped must not leak out behind it.
 		const pg = await openTyping();
 		server.control.printDelayMs = 250;
 		await pg.commit("aaa");

@@ -117,18 +117,31 @@ export function Recorder() {
 		__refresh();
 	};
 
+	// What "Mute KB/M" actually covers, in a script. A recording is not only
+	// keyboard and mouse: __runEvents also replays ATX button presses and GPIO
+	// switches and pulses, which the switch says nothing about and must not
+	// block -- muting the keyboard before power-cycling a host is exactly the
+	// thing someone would do.
+	const MUTED_EVENTS = [
+		"print", "key",
+		"mouse_button", "mouse_move", "mouse_wheel", "mouse_relative", "mouse_move_random",
+	];
+
+	var __saySilenced = function(what) {
+		wm.info(
+			`The script was ${what}: <b>Mute KB/M</b> is on, so the page is not`
+			+ " sending keyboard or mouse events.",
+		);
+	};
+
 	var __playRecord = function() {
-		if (hidMuted()) {
-			// Every event a script replays is a keyboard or mouse event, so
-			// muted there is nothing left for it to do -- and the transports
-			// would drop the lot silently while the LED spun and the counters
-			// ran down, which is a replay that claims to have played. Refused
-			// where the user pressed the button instead. Flipping the switch
-			// mid-replay is caught further down, by the print that then refuses.
-			wm.info(
-				"The script was not played: <b>Mute KB/M</b> is on, so the page is not"
-				+ " sending keyboard or mouse events.",
-			);
+		if (hidMuted() && __events.some((ev) => MUTED_EVENTS.includes(ev.event_type))) {
+			// Refused where the user pressed the button, rather than letting the
+			// transports drop everything while the LED span and the counters ran
+			// down -- a replay that claims to have played. Only when the script
+			// HAS something the switch silences: an ATX or GPIO script is not
+			// keyboard or mouse and is none of this switch's business.
+			__saySilenced("not played");
 			return;
 		}
 		__play_timer = setTimeout(() => __runEvents(0), 0);
@@ -295,6 +308,23 @@ export function Recorder() {
 			__setCounters(__events.length - index + 1, __events_time - time);
 			let ev = __events[index];
 
+			if (hidMuted() && MUTED_EVENTS.includes(ev.event_type)) {
+				// The switch was thrown after Play. Checked HERE, at the event,
+				// because leaving it to the print that refuses only catches a
+				// script that HAS a print -- and a script recorded from the
+				// board or the pad has none, so it would run to the end
+				// delivering nothing, LED spinning, and loop for ever with the
+				// loop switch on.
+				//
+				// Stopped rather than skipped: a script is a sequence, and
+				// dropping the keystrokes out of one while still firing the ATX
+				// press at the end of it produces a state the script never
+				// described.
+				__saySilenced("stopped");
+				__stopProcess();
+				return;
+			}
+
 			if (["delay", "delay_random"].includes(ev.event_type)) {
 				let millis = (
 					ev.event_type === "delay"
@@ -322,13 +352,13 @@ export function Recorder() {
 					(ev.event.delay === undefined ? null : ev.event.delay / 1000),
 					function(http) {
 						if (http === null) {
-							// Muted part-way through: print.js refused, so the rest
-							// of the script would type into a host that receives
-							// none of it. Stopped, and said, rather than run on.
-							wm.info(
-								"The script was stopped: <b>Mute KB/M</b> is on, so the page is"
-								+ " not sending keyboard or mouse events.",
-							);
+							// printText refused locally -- today that is the mute
+							// switch, thrown between the check above and the
+							// request going out. Answered because the contract
+							// requires it: on_done(null) that nobody handles
+							// leaves the replay wedged mid-script with its LED
+							// still spinning, whatever the reason turns out to be.
+							__saySilenced("stopped");
 							__stopProcess();
 						} else if (http.status === 413) {
 							wm.error("Too many text for paste!");

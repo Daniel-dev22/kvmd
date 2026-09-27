@@ -259,7 +259,8 @@ textarea::-webkit-input-placeholder {
 :root[data-hid-secure] textarea#hid-pak-text {
 	-webkit-text-security: disc;
 }
-:root[data-hid-secure] input#hid-type-input:focus {
+:root[data-hid-secure] input#hid-type-input:focus,
+:root[data-hid-secure] input#hid-type-input:not(:placeholder-shown) {
 	/* 📏 Transparent text alone was not enough, and only a SCREENSHOT said so:
 	   an IME draws its own marker under what it is composing -- a filled block
 	   in this chromium, an underline on Android -- and the marker is the width
@@ -269,10 +270,16 @@ textarea::-webkit-input-placeholder {
 	   the other still hides the characters, and neither is a fallback for the
 	   other's absence -- they hide different things.
 
-	   Only while it has FOCUS, which is exactly when it has anything in it:
-	   blur empties the field (keyboard.js, __clearField), and an indented empty
-	   field would push its placeholder off screen too, leaving a box with no
-	   hint in it for as long as the switch is on.
+	   Scoped to a field that HAS something in it, which is the state the mask is
+	   for: an indented empty field would push its own placeholder off screen
+	   too, leaving a box with no hint in it for as long as the switch is on.
+	   Two selectors for one condition, because neither is sufficient alone --
+	   `:focus` covers the ordinary case (blur empties the field, keyboard.js's
+	   __clearField), and `:not(:placeholder-shown)` covers a field that lost
+	   focus WITHOUT a blur event while an IME still held an uncommitted word in
+	   it: the layout switching to desktop under it, or a tab frozen mid-word
+	   and restored. The padding alone is enough to suppress the placeholder, so
+	   anything the field holds -- content or padding -- masks.
 
 	   Nothing is echoed, not even a disc per character. That is the point: the
 	   field's contents have already reached the host, so an echo of them is a

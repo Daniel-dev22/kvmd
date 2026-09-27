@@ -10,8 +10,8 @@ import {createServer} from "node:http";
 import {createHash} from "node:crypto";
 import {existsSync} from "node:fs";
 import {readFile, writeFile} from "node:fs/promises";
-import {mkdtemp, rm} from "node:fs/promises";
-import {tmpdir} from "node:os";
+import {mkdir, mkdtemp, readdir, rm, stat} from "node:fs/promises";
+import {homedir} from "node:os";
 import path from "node:path";
 import {ROOT} from "./helpers.mjs";
 
@@ -197,7 +197,19 @@ export async function serveWeb() {
 	// `hidSnapshot` is what kvmd does on connect -- the whole state, at once.
 	// A test can withhold it to measure what the page ASSUMES about a HID it
 	// has not been told anything about yet.
-	const control = {"printStatus": 200, "printDelayMs": 0, "session": false, "hidSnapshot": true};
+	// What a replayed script asked the appliance to do that is NOT keyboard or
+	// mouse. Recorded separately because "Mute KB/M" deliberately does not
+	// cover it -- an ATX press muted is a press that must still happen -- and
+	// there is no way to tell that from `host`, which is the HID's record.
+	const atx = [];
+	// `printAbort` kills the connection instead of answering, which is the only
+	// way to give the page an XHR with `status === 0` -- a request that DIED,
+	// as opposed to one that was refused before it left. The page has to tell
+	// those apart: kvmd may have typed all of it.
+	const control = {
+		"printStatus": 200, "printDelayMs": 0, "printAbort": false,
+		"session": false, "hidSnapshot": true,
+	};
 	let hid = hidState();
 	const sockets = new Set();
 
@@ -237,10 +249,20 @@ export async function serveWeb() {
 			if (control.printDelayMs > 0) {
 				await new Promise((done) => setTimeout(done, control.printDelayMs));
 			}
+			if (control.printAbort) {
+				req.socket.destroy();
+				return;
+			}
 			if (control.printStatus !== 200) {
 				res.writeHead(control.printStatus).end("nope");
 				return;
 			}
+			res.writeHead(200, {"Content-Type": "application/json"});
+			res.end(JSON.stringify({"ok": true, "result": {}}));
+			return;
+		}
+		if (rel.endsWith("/api/atx/click")) {
+			atx.push(req.url);
 			res.writeHead(200, {"Content-Type": "application/json"});
 			res.end(JSON.stringify({"ok": true, "result": {}}));
 			return;
@@ -317,6 +339,7 @@ export async function serveWeb() {
 		"origin": `http://127.0.0.1:${server.address().port}`,
 		"printed": printed,
 		"host": host,
+		"atx": atx,
 		// Waits for what the host was expected to receive rather than sleeping
 		// a guessed number of milliseconds -- long enough on an idle machine
 		// and not on one running four browsers at once. An expectation of
@@ -359,8 +382,10 @@ export async function serveWeb() {
 		"reset": () => {
 			printed.length = 0;
 			host.length = 0;
+			atx.length = 0;
 			control.printStatus = 200;
 			control.printDelayMs = 0;
+			control.printAbort = false;
 			control.session = false;
 			control.hidSnapshot = true;
 			hid = hidState();
@@ -442,12 +467,57 @@ export async function waitOnline(pg, ms = 5000) {
 	}
 }
 
+// Where a browser's throwaway profile lives, and why it is not /tmp.
+//
+// 🔴 `/tmp` on this machine is TMPFS -- every byte a profile holds is RAM --
+// and snap confinement makes cleaning it impossible rather than merely
+// wasteful: a snap-packaged chromium has its own private /tmp, so
+// `--user-data-dir=/tmp/x` puts the real profile in
+// `/tmp/snap-private-tmp/snap.chromium/tmp/x` while this process deletes an
+// empty stub at `/tmp/x`. That directory is root-owned and `drwx------`, so
+// the harness cannot reach it even to try.
+//
+// 📏 It therefore leaked on the HAPPY path, not just when a run threw: 285
+// profiles, 5.4 GB of RAM, accumulated over three days and filled swap on a
+// 30 GB box. A `finally { close() }` would not have saved it.
+//
+// Under $HOME instead: snap's `home` interface is not redirected, and this
+// filesystem is ext4, so a leak costs disk rather than memory.
+//
+// ⚠ NOT `~/.cache`, which is where this obviously belongs. 📏 Measured: snap's
+// `home` interface does not grant HIDDEN directories, so chromium dies with
+// `Failed to create .../SingletonLock: Permission denied` before it opens a
+// port. The directory has to be one a snap may write, which means a visible
+// one.
+const PROFILES = path.join(homedir(), "kvmd-jstest-profiles");
+
+// SIGKILL defeats every cleanup handler there is, and a suite run under a test
+// timeout is killed exactly that way -- so the only reliable cleanup is one
+// that runs at the START of the next run. Anything older than the window no
+// suite run can outlive is nobody's.
+const STALE_MS = 6 * 3600 * 1000;
+
+async function profileBase() {
+	await mkdir(PROFILES, {"recursive": true});
+	const now = Date.now();
+	for (const name of await readdir(PROFILES).catch(() => [])) {
+		const full = path.join(PROFILES, name);
+		// A concurrent run's profile is minutes old, not hours; its mtime moves
+		// while the browser is writing. Anything past the window was abandoned.
+		const when = await stat(full).then((st) => st.mtimeMs).catch(() => now);
+		if (now - when > STALE_MS) {
+			await rm(full, {"recursive": true, "force": true}).catch(() => {});
+		}
+	}
+	return PROFILES;
+}
+
 export async function launchBrowser() {
 	const bin = chromiumPath();
 	if (!bin) {
 		throw new Error("no chromium binary found; set CHROMIUM=/path/to/chromium");
 	}
-	const profile = await mkdtemp(path.join(tmpdir(), "kvmd-jstest-"));
+	const profile = await mkdtemp(path.join(await profileBase(), "run-"));
 	const proc = spawn(bin, [
 		"--headless=new",
 		"--disable-gpu",
@@ -459,7 +529,7 @@ export async function launchBrowser() {
 		"about:blank",
 	], {"stdio": ["ignore", "ignore", "pipe"]});
 
-	const port = await new Promise((resolve, reject) => {
+	const started = new Promise((resolve, reject) => {
 		let buf = "";
 		const timer = setTimeout(() => reject(new Error(`chromium did not start:\n${buf}`)), 30000);
 		proc.stderr.on("data", (chunk) => {
@@ -473,11 +543,37 @@ export async function launchBrowser() {
 		proc.on("exit", (code) => reject(new Error(`chromium exited ${code}:\n${buf}`)));
 	});
 
+	// Everything below owns the profile through close(). Until then nothing
+	// does, and a browser that never starts is exactly when a run is abandoned
+	// -- which is how the directory this sweeps came to exist in the first
+	// place.
+	let port;
+	try {
+		port = await started;
+	} catch (ex) {
+		proc.kill("SIGKILL");
+		await rm(profile, {"recursive": true, "force": true}).catch(() => {});
+		throw ex;
+	}
+
 	return {
 		"newPage": () => newPage(port),
 		"close": async () => {
-			proc.kill();
-			await rm(profile, {"recursive": true, "force": true});
+			// Waited for, not merely signalled. kill() returns the instant the
+			// signal is sent and chromium goes on writing its profile for a
+			// while after -- so removing it here raced, and lost with
+			// ENOTEMPTY. It never showed before this profile moved out of
+			// /tmp, because under snap confinement the directory being removed
+			// was an empty stub and the real one was unreachable.
+			const stopped = new Promise((done) => proc.once("exit", done));
+			proc.kill("SIGTERM");
+			const forced = setTimeout(() => proc.kill("SIGKILL"), 5000);
+			await stopped;
+			clearTimeout(forced);
+			// maxRetries covers the last writes of a child that outlived its
+			// parent by a few milliseconds. force, so a profile already gone is
+			// not an error -- the sweep at the next launch may have taken it.
+			await rm(profile, {"recursive": true, "force": true, "maxRetries": 5, "retryDelay": 100});
 		},
 	};
 }

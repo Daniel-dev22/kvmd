@@ -870,6 +870,268 @@ describe("the mute switch reaches every writer", {"skip": chromiumPath() ? false
 			`a replayed key must not be pressed on the host once muted: ${JSON.stringify(replayed)}`);
 	});
 
+	test("a lone Enter says so too, with no text around it to fail first", async () => {
+		// 📏 The canary that found this: deleting the mute branch from the
+		// bar's one wording function survived the whole suite, because a burst
+		// of TEXT is also announced by the queue's error path and every test
+		// typed some. An Enter on its own never reaches that path -- the queue
+		// treats a muted key as a deliberate silence and carries on -- so this
+		// is the only thing that can hold the sentence up.
+		const pg = await open();
+		await showKeyboard(pg);
+		await setMuted(pg, true);
+
+		await pg.key("Enter", "Enter", 13);
+		const said = await saidWithin(pg);
+		const host = await server.waitHost(0, 400);
+		await pg.close();
+
+		assert.match(said, /muted/i,
+			`a muted Enter has to say what stopped it, got ${JSON.stringify(said)}`);
+		assert.deepEqual(host.filter((l) => !l.endsWith(" up")), [],
+			`and must not be pressed on the host: ${JSON.stringify(host)}`);
+	});
+
+	test("a replay stops, and says so, when the switch goes on before one of its prints", async () => {
+		// 📏 The other canary: deleting the recorder's answer to a local
+		// refusal survived, because a replay refuses to START while muted and
+		// every replay test began that way. Reaching a print with the switch on
+		// takes a script with a gap in it and the switch thrown inside the gap
+		// -- and without the branch the callback reads `.status` off null,
+		// throws, and leaves the replay wedged with its LED still spinning.
+		const pg = await open();
+		await showKeyboard(pg);
+		await pg.eval(`document.getElementById("hid-recorder-record").click()`);
+		await tap(pg, await pg.eval(centre(ESC)));
+		await pg.eval("new Promise((r) => setTimeout(r, 900))");
+		await pg.commit("zz"); // A print, recorded only once kvmd has answered 200
+		await server.waitHost(3);
+		await pg.eval(`document.getElementById("hid-recorder-stop").click()`);
+		assert.match(await pg.eval(`document.getElementById("hid-recorder-events-count").innerHTML`), /[1-9]/,
+			"precondition: something has to have been recorded");
+
+		const before = server.host.length;
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		await setMuted(pg, true);
+		const said = await modalSaid(pg, 4000);
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		const replayed = server.host.slice(before);
+		const playing = await pg.eval(`document.getElementById("hid-recorder-led").title`);
+		await pg.close();
+
+		assert.deepEqual(replayed.filter((l) => l.startsWith("print ")), [],
+			`a replayed print must not reach a muted host: ${JSON.stringify(replayed)}`);
+		assert.match(said, /mute/i,
+			`a replay cut short has to say why, got ${JSON.stringify(said)}`);
+		assert.doesNotMatch(playing, /Playing/,
+			`and it has to actually stop, not sit there: ${JSON.stringify(playing)}`);
+	});
+
+	test("a script recorded while muted holds the text as well as the Enter", async () => {
+		// 🔴 Found by three review lenses independently, which is the strongest
+		// signal a review produces. Moving the rule down to the transports left
+		// __recordWsEvent ABOVE it: the bar's Enter was still recorded (it
+		// always has been, muted or not) while its text was not, because the
+		// print never returned 200. Record `reboot` + Enter while muted, unmute
+		// later, press Play, and the host gets a bare Enter into whatever is on
+		// its command line.
+		const pg = await open();
+		await showKeyboard(pg);
+		await setMuted(pg, true);
+		await pg.eval(`document.getElementById("hid-recorder-record").click()`);
+		await pg.commit("zz");
+		await pg.key("Enter", "Enter", 13);
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		await pg.eval(`document.getElementById("hid-recorder-stop").click()`);
+
+		const muted_wire = server.host.filter((l) => !l.endsWith(" up"));
+		// Replay it with the switch off and read what the host gets: the script
+		// is only worth what it does on playback.
+		await setMuted(pg, false);
+		const before = server.host.length;
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		await server.waitHost(before + 1, 4000);
+		const replayed = server.host.slice(before);
+		await pg.close();
+
+		assert.deepEqual(muted_wire, [],
+			`nothing may have reached the host while muted: ${JSON.stringify(muted_wire)}`);
+		assert.notEqual(replayed.length, 0,
+			"precondition: the recording has to replay at all, or this proves nothing");
+		const enter = replayed.indexOf("key Enter down");
+		const text = replayed.findIndex((l) => l.startsWith("print "));
+		assert.notEqual(text, -1,
+			`the script kept the Enter and lost the text -- a bare Enter at the host: ${JSON.stringify(replayed)}`);
+		assert.ok(enter === -1 || text < enter,
+			`the text has to be typed before the Enter that runs it: ${JSON.stringify(replayed)}`);
+	});
+
+	test("a muted bar key does not let go of what the user latched", async () => {
+		// The two ways out disagreed: print.js deliberately does not put the
+		// board down for a print it refuses ("a side effect they did not ask
+		// for"), while the key path called releaseAll() unconditionally -- so
+		// muted, a Backspace in the bar silently un-latched Ctrl on the strip
+		// and sent a key-up for a key the host never received.
+		const pg = await open();
+		await showKeyboard(pg);
+		await setMuted(pg, true);
+		await tap(pg, await pg.eval(centre(CTRL)));
+		assert.match(await pg.eval(classOf(CTRL)), /\bholded\b/,
+			"precondition: the tap has to latch the key on screen");
+
+		const before = server.host.length;
+		await pg.key("Backspace", "Backspace", 8);
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		const cls = await pg.eval(classOf(CTRL));
+		const wire = server.host.slice(before);
+		await pg.close();
+
+		assert.match(cls, /\bholded\b/,
+			`a keystroke that went nowhere must not drop the latch: class=${cls}`);
+		// The Backspace's own release goes out, as every release does. What
+		// must NOT be there is a release of the key the user is still holding.
+		assert.deepEqual(wire.filter((l) => l.includes("ControlLeft")), [],
+			`the latched key must not be let go on the host either: ${JSON.stringify(wire)}`);
+	});
+
+	test("a keys-only script stops and says so when the switch goes on mid-replay", async () => {
+		// The gap the first mid-replay test left: it asserted only that the
+		// second key never arrived, which is also true of a replay that runs
+		// happily to the end delivering nothing with its LED spinning -- and
+		// with the loop switch on, for ever. A script recorded from the board
+		// has no print in it, so "the print that then refuses" caught nothing.
+		const pg = await open();
+		await showKeyboard(pg);
+		await pg.eval(`document.getElementById("hid-recorder-record").click()`);
+		await tap(pg, await pg.eval(centre(ESC)));
+		await pg.eval("new Promise((r) => setTimeout(r, 900))");
+		await tap(pg, await pg.eval(centre(TAB)));
+		await pg.eval(`document.getElementById("hid-recorder-stop").click()`);
+		await server.waitHost(4);
+
+		const before = server.host.length;
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		await setMuted(pg, true);
+		const said = await modalSaid(pg, 4000);
+		await pg.eval("new Promise((r) => setTimeout(r, 500))");
+		const playing = await pg.eval(`document.getElementById("hid-recorder-led").title`);
+		const replayed = server.host.slice(before);
+		await pg.close();
+
+		assert.ok(replayed.includes("key Escape down"),
+			`precondition: the replay has to have started: ${JSON.stringify(replayed)}`);
+		assert.deepEqual(replayed.filter((l) => l === "key Tab down"), [],
+			`a replayed key must not be pressed on a muted host: ${JSON.stringify(replayed)}`);
+		assert.match(said, /mute/i, `a replay cut short has to say why, got ${JSON.stringify(said)}`);
+		assert.doesNotMatch(playing, /Playing/,
+			`and it has to stop rather than run on delivering nothing: ${JSON.stringify(playing)}`);
+	});
+
+	test("a script with no keyboard or mouse in it plays while muted", async () => {
+		// The over-reach in the other direction, and the reason the refusal is
+		// not simply "muted ⇒ refuse": a recording also replays ATX and GPIO,
+		// which this switch says nothing about. Muting the keyboard before
+		// power-cycling a host is exactly the thing someone would do.
+		const pg = await open();
+		await pg.eval(`(() => {
+			const f = document.getElementById("hid-recorder-new-script-file");
+			const script = [{"event_type": "atx_button", "event": {"button": "power"}}];
+			const file = new File([JSON.stringify(script)], "s.json", {"type": "application/json"});
+			const dt = new DataTransfer();
+			dt.items.add(file);
+			f.files = dt.files;
+			f.dispatchEvent(new Event("change"));
+		})()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 300))");
+		assert.equal(await pg.eval(`document.getElementById("hid-recorder-events-count").innerHTML`), "1",
+			"precondition: the ATX script has to have loaded");
+
+		await setMuted(pg, true);
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 600))");
+		const atx = server.atx.length;
+		const said = await modalSaid(pg, 500);
+		await pg.close();
+		assert.equal(atx, 1,
+			`an ATX press is not a keyboard or mouse event and must still fire: ${atx} arrived`);
+		assert.doesNotMatch(said, /mute/i,
+			`and the page must not refuse it: ${JSON.stringify(said)}`);
+	});
+
+	test("the Shortcuts menu says the switch stopped it, and asks nothing first", async () => {
+		// The fourth surface with the same promise: ~20 hotkeys that, muted,
+		// flashed their keys, put three all-zero reports on the wire and did
+		// nothing -- and SysRq still asked "do you want to press this hotkey?"
+		// about something that could not happen.
+		const pg = await open();
+		await setMuted(pg, true);
+		const before = server.host.length;
+		await pg.eval(`document.querySelector("[data-keyboard-shortcut]").click()`);
+		const said = await modalSaid(pg);
+		await pg.eval("new Promise((r) => setTimeout(r, 300))");
+		const wire = server.host.slice(before).filter((l) => !l.endsWith(" up"));
+		await pg.close();
+		assert.match(said, /mute/i, `a hotkey that cannot be sent has to say so, got ${JSON.stringify(said)}`);
+		assert.doesNotMatch(said, /do you want/i, "and it must not be a confirmation for something that cannot happen");
+		assert.deepEqual(wire, [], `nothing may reach the host: ${JSON.stringify(wire)}`);
+	});
+
+	test("a print that dies in flight is not blamed on a switch flipped afterwards", async () => {
+		// 📏 Found by two lenses. `status === 0` is a request that DIED, not one
+		// that never left -- kvmd may have typed all of it -- and the message
+		// used to be chosen by re-reading the switch at the moment of writing
+		// the sentence. Mute the page AFTER the print is in flight and the bar
+		// claimed "Muted -- nothing was sent" about a burst the host had.
+		const pg = await open();
+		await showKeyboard(pg);
+		// Answered by killing the connection, which is what gives the page an
+		// XHR with status 0 -- the one outcome that is NOT "it never left".
+		server.control.printDelayMs = 400;
+		server.control.printAbort = true;
+		await pg.commit("ls");
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
+		await setMuted(pg, true);
+		const said = await saidWithin(pg, 8000);
+		await pg.close();
+		server.control.printDelayMs = 0;
+		server.control.printAbort = false;
+		assert.notEqual(said, "", "precondition: the print has to have failed and said something");
+		assert.doesNotMatch(said, /muted/i,
+			`the page must not claim the switch stopped a print it had already issued: ${JSON.stringify(said)}`);
+	});
+
+	test("a muted tap does not click the host, but its release still goes out", async () => {
+		// 📏 The writer nobody was measuring. mouse.js is one of the three that
+		// lost its own copy of the check, and no test in the suite muted the
+		// mouse at all -- so narrowing RELEASABLE to ["key"] left the whole
+		// suite green while a finger holding a latched Left and then muting
+		// would leave the button pressed on someone's host, which is the exact
+		// defect mute.js's carve-out exists for.
+		const pg = await open();
+		await setMuted(pg, true);
+		const before = server.host.length;
+		await tap(pg, await pg.eval(centre("#stream-box")));
+		await pg.eval("new Promise((r) => setTimeout(r, 500))");
+		const wire = server.host.slice(before);
+
+		// The positive twin: unmuted, the same tap is a whole click.
+		await setMuted(pg, false);
+		const mid = server.host.length;
+		await tap(pg, await pg.eval(centre("#stream-box")));
+		await server.waitHost(mid + 1, 3000);
+		const after = server.host.slice(mid);
+		await pg.close();
+
+		assert.deepEqual(wire.filter((l) => l.endsWith(" down")), [],
+			`a muted tap must not press a button on the host: ${JSON.stringify(wire)}`);
+		assert.ok(wire.some((l) => l.startsWith("mouse ") && l.endsWith(" up")),
+			`but its release must still go out, or a latched button could be left down: ${JSON.stringify(wire)}`);
+		assert.ok(after.some((l) => l.startsWith("mouse ") && l.endsWith(" down")),
+			`unmuted, the same tap has to click: ${JSON.stringify(after)}`);
+	});
+
 	test("playing a script while muted refuses instead of pretending to play", async () => {
 		const pg = await open();
 		await showKeyboard(pg);
@@ -913,8 +1175,8 @@ describe("one way to type, and it cannot be bypassed", () => {
 			const src = read(f).replace(/\/\/[^\n]*/g, "");
 			// Backticks included: a template literal is a string too, and 📏 a
 			// review lens walked straight past this guard with one.
-			assert.doesNotMatch(src, /["'`]api\/hid\/print["'`]/,
-				`${f}: typing text on the host goes through printText(), which puts the board down first`);
+			assert.doesNotMatch(src, /["'`]api\/hid\/(print|events)/,
+				`${f}: input reaches the host through printText() or sendHidEvent(), which is where the rules are`);
 		}
 	});
 
@@ -932,6 +1194,23 @@ describe("one way to type, and it cannot be bypassed", () => {
 			const src = read(f).replace(/\/\/[^\n]*/g, "");
 			assert.doesNotMatch(src, /["'`]hid-mute-switch["'`]/,
 				`${f}: the switch is mute.js's to read -- import hidMuted() or hidSilences()`);
+		}
+	});
+
+	test("nothing writes the socket except the one function that reads the switch", () => {
+		// The other half of the same claim, and the one that was true only by
+		// inspection: `sendHidEvent` is a property assigned onto the socket
+		// object, not a boundary, so a module holding the `ws` it was handed by
+		// setSocket() could encode a HID frame and write it itself -- unmuted,
+		// unwarned, and green. kvmd also exposes api/hid/events/send_key, which
+		// the grep above now covers.
+		for (const f of jsFiles()) {
+			if (f.endsWith("kvm/session.js") || f.endsWith("kvm/stream_media.js")) {
+				continue; // The HID encoder, and the media socket, which is not HID
+			}
+			const src = read(f).replace(/\/\/[^\n]*/g, "");
+			assert.doesNotMatch(src, /\bws\.send\(|__ws\.send\(/,
+				`${f}: write HID through sendHidEvent(), which is where "Mute KB/M" is applied`);
 		}
 	});
 

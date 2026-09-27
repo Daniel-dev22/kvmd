@@ -990,6 +990,57 @@ describe("\"Hide input text\" covers every field that types", {"skip": chromiumP
 			`an unfocused field must keep its placeholder on screen, got indent ${m.indent}`);
 	});
 
+	test("a word left in the field is masked even after it loses focus", async () => {
+		// The `:focus` scope alone has a hole: an IME's uncommitted word sits in
+		// the field, and focus can be lost WITHOUT a blur event -- the element
+		// being hidden when the layout flips to desktop, or a frozen tab
+		// restored. The word would then render at 16px in the clear the moment
+		// the bar was visible again. `:not(:placeholder-shown)` closes it,
+		// because anything in the field -- content or the padding -- suppresses
+		// the placeholder.
+		const pg = await openBar();
+		await pg.eval(SECURE(true));
+		const m = await pg.eval(`(() => {
+			const bar = document.getElementById("hid-type-input");
+			// The value is put back AFTER the blur, on purpose: an ordinary
+			// blur runs the page's own handler and empties the field, so
+			// blurring a field with a word in it cannot reproduce the state.
+			// What is being measured is a field that HOLDS something while
+			// unfocused, however it got there.
+			bar.blur();
+			bar.value = "passw0rd";
+			const cs = getComputedStyle(bar);
+			return {"colour": cs.color, "indent": cs.textIndent, "focused": document.activeElement === bar};
+		})()`);
+		await pg.close();
+		assert.equal(m.focused, false, "precondition: the field must not have focus for this to measure anything");
+		assert.equal(m.indent, "-9999px",
+			`a field still holding a word must stay masked without focus, got ${m.indent}`);
+		assert.equal(m.colour, "rgba(0, 0, 0, 0)", "and its characters hidden too");
+	});
+
+	test("the Text panel's box does not hand what you type to a spellchecker", async () => {
+		// Masking is on screen only: a spellchecker still draws squiggles to
+		// WORD WIDTH under the discs, and a browser with remote spell-check
+		// enabled sends the contents to its vendor. The typing bar has carried
+		// these four since Phase 7; the field the switch sits BESIDE had none.
+		const pg = await openBar();
+		const m = await pg.eval(`(() => {
+			const box = document.getElementById("hid-pak-text");
+			const bar = document.getElementById("hid-type-input");
+			return {
+				"box_spell": box.spellcheck, "box_complete": box.getAttribute("autocomplete"),
+				"bar_spell": bar.spellcheck, "bar_complete": bar.getAttribute("autocomplete"),
+			};
+		})()`);
+		await pg.close();
+		assert.equal(m.box_spell, false, "the Text panel's box must not be spellchecked");
+		assert.equal(m.box_complete, "off", "nor offered to autocomplete");
+		// Both, so this cannot pass by the bar alone -- they are one promise.
+		assert.equal(m.bar_spell, false, "and neither must the typing bar");
+		assert.equal(m.bar_complete, "off");
+	});
+
 	test("the switch is one preference, not one per field", async () => {
 		// Two controls for one promise is how they come to disagree. There is
 		// one switch, it is the Text menu's, and what it covers is a stylesheet

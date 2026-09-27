@@ -599,32 +599,25 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		}, PROBLEM_SHOWN_MS);
 	};
 
-	// Everything the page can see standing between a keystroke and the host, in
-	// the words of whatever is doing it -- or null when nothing is.
-	//
-	// The mute branch does NOT gate anything: the switch is enforced by the two
-	// transports (session.js, print.js) and would be obeyed with every line of
-	// this deleted. What is decided here is only what the user is TOLD, which is
-	// the half a transport cannot do -- it has no idea which surface it is
-	// carrying for. The switch takes precedence over the HID's readiness because
-	// it is a fact and readiness is an inference.
-	var __whyBlocked = function() {
-		if (hidMuted()) {
-			return MUTED_SAID;
-		}
-		if (!__hidReady()) {
-			return `${__whyNotReady()} \u2014 this may not have arrived`;
-		}
-		return null;
-	};
-
 	// Said when the page can see the keystroke will not get there. Fired per
 	// burst rather than once per session on purpose: it is the answer to "did
 	// that arrive?", asked at the moment the user asks it.
+	//
+	// Neither branch GATES anything: the switch is enforced by the two
+	// transports (session.js, print.js) and would be obeyed with every line of
+	// this deleted. What is decided here is only what the user is TOLD, which
+	// is the half a transport cannot do -- it has no idea which surface it is
+	// carrying for. The switch is asked first because it is a fact the page can
+	// check, where readiness is an inference about the far end.
 	var __warnBeforeSend = function() {
-		let why = __whyBlocked();
-		if (why !== null) {
-			__sayTyping(why);
+		if (hidMuted()) {
+			// Urgent, because the keystroke is DROPPED -- which is what urgent
+			// means here. A burst of TEXT gets a second, louder statement from
+			// onError, but a lone key gets only this one, and a warning already
+			// on screen would otherwise swallow it for four seconds.
+			__sayTyping(MUTED_SAID, true);
+		} else if (!__hidReady()) {
+			__sayTyping(`${__whyNotReady()} \u2014 this may not have arrived`);
 		}
 	};
 
@@ -646,12 +639,23 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				}
 				printText(text, keymap, 0, function(http) {
 					if (http === null) {
-						// Muted: print.js sent nothing. Work queued before the
-						// switch was thrown must not leak out after it either, so
-						// what is still behind this goes with it -- and it is not
-						// a failure to announce, because __warnBeforeSend has
-						// already said what happened.
-						done(false, null);
+						// Muted: print.js sent nothing, and it is THIS frame
+						// that knows so. The reason travels with the failure
+						// rather than being re-derived from the switch when the
+						// message is finally worded -- by then the user may
+						// have muted AFTER a real print died in flight, and the
+						// page would claim nothing was sent about a burst the
+						// host may have typed in full.
+						//
+						// The text is still recorded. A recording is a script
+						// of what you meant, not a log of what left, and the
+						// bar's own Enter is recorded while muted too -- it
+						// always has been. Recording one and not the other is
+						// what produces a script holding a bare Enter and none
+						// of the command it was meant to run, which is the
+						// hazard the 200-only branch below exists to avoid.
+						__recordPrintEvent(text, keymap, 0);
+						done(false, MUTED_SAID);
 						return;
 					}
 					if (http.status === 200) {
@@ -676,7 +680,17 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				// Backspace under a latched Ctrl is delete-word in a shell, and
 				// Enter under it is not Enter. This is the other transport --
 				// print.js cannot reach it.
-				self.releaseAll();
+				//
+				// ...and for the same reason it does NOT go down when nothing
+				// is going to be sent. print.js refuses before touching the
+				// board on exactly this argument: dropping the modifiers the
+				// user latched, for a keystroke that never left, is a side
+				// effect they did not ask for. Asking here decides local board
+				// state, which no transport can decide for us; it gates
+				// nothing that leaves the page.
+				if (!hidMuted()) {
+					self.releaseAll();
+				}
 				__sendKey(code, state);
 				return true;
 			},
@@ -690,19 +704,26 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				if (why === null) {
 					return; // A deliberate drop, not a failure
 				}
-				// A status only exists when kvmd answered. A key whose socket
-				// was gone, and a print the page refused for the same reason,
-				// both arrive here without one -- and both mean the link.
-				let status = ((why.what === "print" && why.http !== null) ? why.http.status : 0);
-				if (status > 0) {
+				// Three outcomes, and the page must not guess between them by
+				// re-reading a control: a switch can move between the failure
+				// and the sentence about it.
+				//
+				// A STRING is the page refusing in its own words, handed over
+				// by whichever frame refused. An XHR means kvmd was asked --
+				// and `status === 0` there is a request that DIED, which is not
+				// the same as one that never left: it may have typed some of it,
+				// so this must not claim otherwise. Anything else is a key whose
+				// socket was gone, or a print refused for the same reason.
+				let info = ((why.what === "print") ? why.http : null);
+				if (typeof info === "string") {
+					__sayTyping(info, true);
+				} else if (info !== null && info.status > 0) {
 					// The body can hold what the user typed, so it is not logged.
-					tools.error("Keyboard: typing failed with HTTP", status);
-					__sayTyping(`Not sent \u2014 PiKVM error ${status}`, true);
-				} else if (hidMuted()) {
-					// The page refused on the user's own switch, which is not an
-					// error and is not the link: saying "no connection to PiKVM"
-					// here would send someone debugging their network.
-					__sayTyping(MUTED_SAID, true);
+					tools.error("Keyboard: typing failed with HTTP", info.status);
+					__sayTyping(`Not sent \u2014 PiKVM error ${info.status}`, true);
+				} else if (info !== null) {
+					tools.error("Keyboard: typing failed: PiKVM never answered");
+					__sayTyping("No answer from PiKVM \u2014 this may have arrived", true);
 				} else {
 					tools.error("Keyboard: typing failed: the HID connection is down");
 					__sayTyping("Not sent \u2014 no connection to PiKVM", true);

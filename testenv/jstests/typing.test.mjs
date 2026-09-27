@@ -446,6 +446,14 @@ test("muting is applied where the page SENDS, not where it decides to", () => {
 
 	const pr = read("web/share/js/kvm/print.js");
 	const print = pr.slice(pr.indexOf("export function printText"));
-	assert.match(print, /^[\s\S]{0,900}hidMuted\(\)/,
+	// An ORDER, not a byte window. This was `{0,900}`, which happened to sit
+	// between the two today with 91 characters of slack -- trimming a comment
+	// would have let a check moved BELOW the release pass a test whose message
+	// says it must be above it.
+	const refuses = print.indexOf("hidMuted()");
+	const releases = print.indexOf("dropHeldKeys");
+	assert.notEqual(refuses, -1, "printText no longer consults the mute switch at all");
+	assert.notEqual(releases, -1, "printText no longer puts the board down");
+	assert.ok(refuses < releases,
 		"printText must refuse BEFORE it touches the board or issues the request");
 });
