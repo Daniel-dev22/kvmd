@@ -15,7 +15,7 @@
 
 import test, {before, after, describe} from "node:test";
 import assert from "node:assert/strict";
-import {serveWeb, launchBrowser, chromiumPath} from "./browser.mjs";
+import {serveWeb, launchBrowser, chromiumPath, centre, classOf, tap} from "./browser.mjs";
 
 const MIN_TARGET = 44;
 const KVM = "kvm/index.html";
@@ -49,40 +49,6 @@ async function open(width = 390, {touch = true, height = 844} = {}) {
 	// changes nothing else about the page.
 	await pg.goto(`${server.origin}/${KVM}?debug=1`);
 	return pg;
-}
-
-// A touch is dispatched at coordinates, so a target that is not on screen does
-// not fail -- it silently aims at 0,0, which is the back link in the navbar, and
-// the page navigates away mid-test. The instrument refuses instead.
-const centre = (selector) => `(() => {
-	const el = document.querySelector(${JSON.stringify(selector)});
-	if (el === null) { throw new Error("no element for " + ${JSON.stringify(selector)}); }
-	// The persistent strip is a horizontal scroller while typing, so a key can
-	// be in the DOM, sized, and still off the right edge -- and a touch
-	// dispatched at its "centre" then lands on whatever is at those
-	// coordinates instead, silently. A user reaches it by scrolling; so does
-	// this.
-	el.scrollIntoView({"block": "nearest", "inline": "nearest"});
-	const r = el.getBoundingClientRect();
-	if (r.width === 0 || r.height === 0) {
-		throw new Error(${JSON.stringify(selector)} + " is not on screen: nothing to touch");
-	}
-	const x = r.left + r.width / 2, y = r.top + r.height / 2;
-	if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
-		throw new Error(${JSON.stringify(selector)} + " is outside the viewport even after scrolling: "
-			+ JSON.stringify({x, y}));
-	}
-	return {"x": x, "y": y, "w": r.width, "h": r.height};
-})()`;
-
-const classOf = (selector) => `document.querySelector(${JSON.stringify(selector)}).className`;
-
-async function tap(pg, point, hold = 0) {
-	await pg.touch("touchStart", [point]);
-	if (hold > 0) {
-		await new Promise((done) => setTimeout(done, hold));
-	}
-	await pg.touch("touchEnd", []);
 }
 
 // ===========================================================================

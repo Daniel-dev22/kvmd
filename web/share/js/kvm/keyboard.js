@@ -24,7 +24,7 @@ import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
 import {UI_MOBILE} from "../ui.js";
-import {printText} from "./print.js";
+import {printText, setHeldKeyReleaser} from "./print.js";
 import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
 
@@ -51,6 +51,11 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		// resolves a code to every element carrying it, which is what keeps
 		// modifier state in step between the desktop and compact boards.
 		__keypad = new Keypad($("keyboard-window"), __sendKey);
+		// Anything that types TEXT on the host does it through print.js, which
+		// puts the board down first: a modifier latched on the strip is a key
+		// held down on the HID, and every character the server types under it
+		// arrives as a chord. print.js carries the whole reasoning.
+		setHeldKeyReleaser(self.releaseAll);
 
 		__initLayers();
 		__initTyping();
@@ -489,19 +494,14 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 						__recordPrintEvent(text, keymap, 0);
 					}
 					done(http.status === 200, http);
-				}, TYPING_TIMEOUT_MS);
+				}, {"timeout": TYPING_TIMEOUT_MS});
 			},
 			"sendKey": function(code, state) {
-				// Reports DELIVERABILITY, not whether anything was sent: a muted
-				// HID is a deliberate silence, an unreachable one is a failure.
-				//
-				// ⚠ It cannot yet tell the difference, so it always claims success.
-				// Answering it properly means reading __online -- which covers the
-				// bigger hole that api/hid/print returns 200 whether or not kvmd
-				// could deliver anything -- AND an instrument that can put a page
-				// with no kvmd behind it back "online", or the refusal ships with
-				// no test that can ever make it fire. Both are Phase 8; the queue's
-				// side of it is implemented and covered.
+				// The board goes down for a key exactly as it does for text:
+				// Backspace under a latched Ctrl is delete-word in a shell, and
+				// Enter under it is not Enter. This is the other transport --
+				// print.js cannot reach it.
+				self.releaseAll();
 				__sendKey(code, state);
 				return true;
 			},

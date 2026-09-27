@@ -26,6 +26,8 @@
 import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
 
+import {printText} from "./print.js";
+
 
 export function Recorder() {
 	var self = this;
@@ -289,27 +291,34 @@ export function Recorder() {
 				return;
 
 			} else if (ev.event_type === "print") {
-				let params = {"limit": 0};
-				if (ev.event.keymap !== undefined) {
-					params["keymap"] = ev.event.keymap;
-				}
+				// Through print.js like every other caller, so a replay starts
+				// from a board with nothing latched on it -- and so that a long
+				// one is not cut off after 15 seconds, which is what the
+				// default timeout on a bare httpPost() gave it.
+				//
+				// An absent field means "whatever the server's default is", so
+				// it is passed as null rather than being sent as `undefined`.
+				let opts = {};
 				if (ev.event.slow !== undefined) {
-					params["slow"] = ev.event.slow;
+					opts["slow"] = ev.event.slow;
 				}
-				if (ev.event.delay !== undefined) {
-					params["delay"] = ev.event.delay / 1000;
-				}
-				tools.httpPost("api/hid/print", params, function(http) {
-					if (http.status === 413) {
-						wm.error("Too many text for paste!");
-						__stopProcess();
-					} else if (http.status !== 200) {
-						wm.error("Keyboard paste error", http.responseText);
-						__stopProcess();
-					} else if (http.status === 200) {
-						__play_timer = setTimeout(() => __runEvents(index + 1, time), 0);
-					}
-				}, ev.event.text, "text/plain");
+				printText(
+					ev.event.text,
+					(ev.event.keymap === undefined ? null : ev.event.keymap),
+					(ev.event.delay === undefined ? null : ev.event.delay / 1000),
+					function(http) {
+						if (http.status === 413) {
+							wm.error("Too many text for paste!");
+							__stopProcess();
+						} else if (http.status !== 200) {
+							wm.error("Keyboard paste error", http.responseText);
+							__stopProcess();
+						} else if (http.status === 200) {
+							__play_timer = setTimeout(() => __runEvents(index + 1, time), 0);
+						}
+					},
+					opts,
+				);
 				return;
 
 			} else if (ev.event_type === "atx_button") {

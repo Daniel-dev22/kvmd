@@ -7,6 +7,7 @@
 
 import {spawn} from "node:child_process";
 import {createServer} from "node:http";
+import {createHash} from "node:crypto";
 import {existsSync} from "node:fs";
 import {readFile, writeFile} from "node:fs/promises";
 import {mkdtemp, rm} from "node:fs/promises";
@@ -33,16 +34,170 @@ const TYPES = {
 	".webmanifest": "application/manifest+json",
 };
 
+// ===========================================================================
+// The websocket half of the fake appliance.
+//
+// Without it a test page has no kvmd behind it at all: `api/auth/check` 404s,
+// the session never opens a socket, and the page sits OFFLINE for ever. That
+// is the right default -- the pages must lay out with no backend -- but it
+// leaves every behaviour that depends on being online untestable, and the bar
+// refusing to type into a dead HID is exactly such a behaviour. A refusal with
+// no instrument that can make it NOT fire is a refusal nobody can prove is
+// conditional.
+//
+// Deliberately dependency-free, like the rest of this harness: RFC 6455 is a
+// sha1 of the client's key and a two-byte header, and the page sends nothing
+// fragmented and nothing over 125 bytes.
+// ===========================================================================
+
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+// Server to client: never masked, and short enough that the two extended
+// length forms are only here so a long keymap list cannot silently truncate.
+function wsFrame(opcode, payload) {
+	const len = payload.length;
+	let head = null;
+	if (len < 126) {
+		head = Buffer.from([0x80 | opcode, len]);
+	} else if (len < 65536) {
+		head = Buffer.alloc(4);
+		head.writeUInt8(0x80 | opcode, 0);
+		head.writeUInt8(126, 1);
+		head.writeUInt16BE(len, 2);
+	} else {
+		head = Buffer.alloc(10);
+		head.writeUInt8(0x80 | opcode, 0);
+		head.writeUInt8(127, 1);
+		head.writeBigUInt64BE(BigInt(len), 2);
+	}
+	return Buffer.concat([head, payload]);
+}
+
+// Client to server: always masked, and arriving in whatever chunks TCP felt
+// like -- so a frame is only handed on once all of it is here. Returning on a
+// short buffer without consuming it is what makes that work.
+function wsReader(onFrame) {
+	let buf = Buffer.alloc(0);
+	return function(chunk) {
+		buf = Buffer.concat([buf, chunk]);
+		for (;;) {
+			if (buf.length < 2) {
+				return;
+			}
+			const opcode = (buf[0] & 0x0f);
+			const masked = ((buf[1] & 0x80) !== 0);
+			let len = (buf[1] & 0x7f);
+			let off = 2;
+			if (len === 126) {
+				if (buf.length < 4) {
+					return;
+				}
+				len = buf.readUInt16BE(2);
+				off = 4;
+			} else if (len === 127) {
+				if (buf.length < 10) {
+					return;
+				}
+				len = Number(buf.readBigUInt64BE(2));
+				off = 10;
+			}
+			if (buf.length < off + (masked ? 4 : 0) + len) {
+				return;
+			}
+			const mask = (masked ? buf.subarray(off, off + 4) : null);
+			off += (masked ? 4 : 0);
+			const payload = Buffer.from(buf.subarray(off, off + len));
+			if (mask !== null) {
+				for (let i = 0; i < len; i++) {
+					payload[i] ^= mask[i & 3];
+				}
+			}
+			buf = buf.subarray(off + len);
+			onFrame(opcode, payload);
+		}
+	};
+}
+
+// The HID state kvmd streams, with the fields the page actually reads. Sent in
+// FULL on every change, because that is what kvmd does (`poll_state` yields
+// `get_state()` whole) and because hid.js assigns `state.keyboard.leds`
+// unconditionally -- a partial event would leave it undefined and throw.
+export function hidState(patch = {}) {
+	const state = {
+		"enabled": true,
+		"online": true,
+		"busy": false,
+		"connected": null,
+		"keyboard": {
+			"online": true,
+			"leds": {"caps": false, "scroll": false, "num": false},
+			"outputs": {"available": [], "active": ""},
+		},
+		"mouse": {
+			"online": true,
+			"absolute": true,
+			"outputs": {"available": [], "active": ""},
+		},
+		"jiggler": {"enabled": false, "active": false, "interval": 60},
+	};
+	return merged(state, patch);
+}
+
+// A patch says what CHANGED, so `{"keyboard": {"online": false}}` has to keep
+// the LEDs it did not mention: hid.js assigns `state.keyboard.leds` whether or
+// not the event carried one, and an undefined one throws on the next read.
+function merged(base, patch) {
+	const out = {...base};
+	for (const [key, value] of Object.entries(patch)) {
+		out[key] = (
+			(isPlain(value) && isPlain(base[key]))
+				? merged(base[key], value)
+				: value
+		);
+	}
+	return out;
+}
+
+const isPlain = (v) => (v !== null && typeof v === "object" && !Array.isArray(v));
+
 // Serves web/ so that ES modules load. Modules are blocked over file://, and
 // the pages under test are module-driven.
 export async function serveWeb() {
 	// Everything the page sends to api/hid/print, in order, so a test can read
 	// what the host would have received.
 	const printed = [];
+	// The same thing from the HOST's side, and across BOTH transports: text
+	// arrives over HTTP and keys over the websocket, so a claim about the order
+	// between them -- "the latched Ctrl was let go before the text was typed"
+	// -- cannot be read from either one alone. Recorded on ARRIVAL, whatever
+	// the answer is going to be, because that is when the host would have seen
+	// it: `control.printStatus` decides only what is said back.
+	const host = [];
 	// Mutable so a test can make the host slow or broken; reset per test.
-	const control = {"printStatus": 200, "printDelayMs": 0};
+	//
+	// `session` is off by default: with no kvmd behind it the page must still
+	// lay out, which is what nearly every test measures. A test that needs the
+	// page ONLINE turns it on BEFORE navigating -- or at any later moment, and
+	// the page's own reconnect loop picks it up within about a second.
+	const control = {"printStatus": 200, "printDelayMs": 0, "session": false};
+	let hid = hidState();
+	const sockets = new Set();
+
+	const sendJson = (sock, ev_type, ev) => sock.write(
+		wsFrame(0x1, Buffer.from(JSON.stringify({"event_type": ev_type, "event": ev}), "utf-8")));
 	const server = createServer(async (req, res) => {
 		const rel = decodeURIComponent(req.url.split("?")[0]);
+		// What the session asks before it opens the socket. A 404 here is how
+		// this harness keeps the page offline by default.
+		if (rel.endsWith("/api/auth/check")) {
+			if (!control.session) {
+				res.writeHead(404).end("not found");
+				return;
+			}
+			res.writeHead(200, {"Content-Type": "application/json"});
+			res.end(JSON.stringify({"ok": true, "result": {}}));
+			return;
+		}
 		// The ONE endpoint that has to answer. Everything else in kvmd's API is
 		// allowed to 404 here -- the pages lay out without it -- but a print
 		// that 404s exercises the queue's FAILURE path, which now discards
@@ -53,7 +208,9 @@ export async function serveWeb() {
 			for await (const chunk of req) {
 				chunks.push(chunk);
 			}
-			printed.push({"body": Buffer.concat(chunks).toString("utf-8"), "url": req.url});
+			const body = Buffer.concat(chunks).toString("utf-8");
+			printed.push({"body": body, "url": req.url});
+			host.push(`print ${JSON.stringify(body)}`);
 			// A stub that can only succeed makes the queue's whole failure path
 			// -- and the 200 check that feeds it -- unreachable from the browser
 			// suite, so a build reporting every failure as success passes. And
@@ -80,18 +237,153 @@ export async function serveWeb() {
 			res.writeHead(404).end("not found");
 		}
 	});
+
+	server.on("upgrade", (req, sock) => {
+		const rel = req.url.split("?")[0];
+		const key = req.headers["sec-websocket-key"];
+		if (!control.session || !rel.endsWith("/api/ws") || !key) {
+			sock.destroy();
+			return;
+		}
+		sock.write(
+			"HTTP/1.1 101 Switching Protocols\r\n"
+			+ "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+			+ `Sec-WebSocket-Accept: ${createHash("sha1").update(key + WS_GUID).digest("base64")}\r\n\r\n`);
+		sockets.add(sock);
+		sock.on("close", () => sockets.delete(sock));
+		sock.on("error", () => sockets.delete(sock));
+		sock.on("data", wsReader(function(opcode, payload) {
+			if (opcode === 0x8) { // Close
+				sock.end(wsFrame(0x8, Buffer.alloc(0)));
+				return;
+			}
+			if (opcode === 0x9) { // Ping
+				sock.write(wsFrame(0xA, payload));
+				return;
+			}
+			if (opcode !== 0x2 || payload.length === 0) {
+				return;
+			}
+			if (payload[0] === 0) {
+				// The session's own heartbeat. Fifteen unanswered ones and the
+				// page tears the socket down and reconnects, which would make
+				// anything measured over more than 15s a test of this reply.
+				sock.write(wsFrame(0x2, Buffer.from([255])));
+				return;
+			}
+			if (payload[0] === 1) { // Key, "\x01" + state + the code, in ASCII
+				host.push(`key ${payload.subarray(2).toString("ascii")} ${(payload[1] & 1) ? "down" : "up"}`);
+			} else if (payload[0] === 2) { // Mouse button, same shape
+				host.push(`mouse ${payload.subarray(2).toString("ascii")} ${(payload[1] & 1) ? "down" : "up"}`);
+			}
+			// Moves, wheels and relative deltas are deliberately not recorded:
+			// a single drag is hundreds of them and would bury everything else.
+		}));
+		// kvmd sends the whole state the moment the socket opens, so the page
+		// is never left guessing what it is connected to.
+		sendJson(sock, "hid", hid);
+		sendJson(sock, "hid_keymaps", {"keymaps": {"default": "en-us", "available": ["en-us", "de"]}});
+	});
+
 	await new Promise((done) => server.listen(0, "127.0.0.1", done));
 	return {
 		"origin": `http://127.0.0.1:${server.address().port}`,
 		"printed": printed,
+		"host": host,
+		// Waits for what the host was expected to receive rather than sleeping
+		// a guessed number of milliseconds -- long enough on an idle machine
+		// and not on one running four browsers at once. An expectation of
+		// NOTHING has to wait out the whole window, since there is no event to
+		// wait for; and the grace period after it is what lets an event that
+		// should NOT have followed show up in the assertion instead of being
+		// missed by a race.
+		"waitHost": async (want, ms = 2000) => {
+			const until = Date.now() + ms;
+			while (Date.now() < until && (want <= 0 || host.length < want)) {
+				await new Promise((done) => setTimeout(done, 25));
+			}
+			await new Promise((done) => setTimeout(done, 150));
+			return host.slice();
+		},
 		"control": control,
+		// A new HID state, pushed to whoever is connected. `patch` is merged
+		// one level deep over the healthy default, so a test says what it is
+		// changing -- `{"keyboard": {"online": false}}` for an unenumerated
+		// gadget -- and gets a FULL event, which is what kvmd sends.
+		"setHid": (patch = {}) => {
+			hid = hidState(patch);
+			for (const sock of sockets) {
+				sendJson(sock, "hid", hid);
+			}
+		},
+		// The link dropping, as opposed to the HID going offline behind it.
+		"dropSession": () => {
+			control.session = false;
+			for (const sock of sockets) {
+				sock.destroy();
+			}
+			sockets.clear();
+		},
 		"reset": () => {
 			printed.length = 0;
+			host.length = 0;
 			control.printStatus = 200;
 			control.printDelayMs = 0;
+			control.session = false;
+			hid = hidState();
+			for (const sock of sockets) {
+				sock.destroy();
+			}
+			sockets.clear();
 		},
-		"close": () => new Promise((done) => server.close(done)),
+		"close": () => new Promise((done) => {
+			for (const sock of sockets) {
+				sock.destroy();
+			}
+			sockets.clear();
+			server.close(done);
+		}),
 	};
+}
+
+// ===========================================================================
+// Driving the page: the three expressions every gesture test needs. They live
+// here rather than in one suite because a second copy of "where is this key"
+// is how two suites end up disagreeing about what a tap is.
+// ===========================================================================
+
+// A touch is dispatched at coordinates, so a target that is not on screen does
+// not fail -- it silently aims at 0,0, which is the back link in the navbar, and
+// the page navigates away mid-test. The instrument refuses instead.
+export const centre = (selector) => `(() => {
+	const el = document.querySelector(${JSON.stringify(selector)});
+	if (el === null) { throw new Error("no element for " + ${JSON.stringify(selector)}); }
+	// A key can be in the DOM, sized, and still outside what is on screen --
+	// inside a sheet that is scrolled, or below the fold -- and a touch
+	// dispatched at its "centre" then lands on whatever is at those
+	// coordinates instead, silently. A user reaches it by scrolling; so does
+	// this.
+	el.scrollIntoView({"block": "nearest", "inline": "nearest"});
+	const r = el.getBoundingClientRect();
+	if (r.width === 0 || r.height === 0) {
+		throw new Error(${JSON.stringify(selector)} + " is not on screen: nothing to touch");
+	}
+	const x = r.left + r.width / 2, y = r.top + r.height / 2;
+	if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+		throw new Error(${JSON.stringify(selector)} + " is outside the viewport even after scrolling: "
+			+ JSON.stringify({x, y}));
+	}
+	return {"x": x, "y": y, "w": r.width, "h": r.height};
+})()`;
+
+export const classOf = (selector) => `document.querySelector(${JSON.stringify(selector)}).className`;
+
+export async function tap(pg, point, hold = 0) {
+	await pg.touch("touchStart", [point]);
+	if (hold > 0) {
+		await new Promise((done) => setTimeout(done, hold));
+	}
+	await pg.touch("touchEnd", []);
 }
 
 export async function launchBrowser() {
