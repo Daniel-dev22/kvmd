@@ -149,10 +149,17 @@ describe("a latched modifier never rewrites what is typed", {"skip": chromiumPat
 		await pg.eval(`document.getElementById("hid-type-board").click()`);
 		await pg.eval("new Promise((r) => setTimeout(r, 250))");
 		const shift = `#keyboard-compact [data-keypad-code="ShiftLeft"]`;
-		await tap(pg, await pg.eval(centre(CTRL)));
-		await tap(pg, await pg.eval(centre(shift)));
-		assert.match(await pg.eval(classOf(CTRL)), /\bholded\b/, "precondition: Ctrl latched");
-		assert.match(await pg.eval(classOf(shift)), /\bholded\b/, "precondition: Shift latched too");
+		// LOCKED, not held, and that is the whole point: a held modifier is
+		// also released by `__unholdAll()` at the end of the first emit, so
+		// with two held keys "release the first" and "release all" still look
+		// the same -- 📏 measured, the `break` survived a two-key test until
+		// they were locked. __unholdAll skips locked keys by design.
+		for (const sel of [CTRL, shift]) {
+			const at = await pg.eval(centre(sel));
+			await tap(pg, at); // held
+			await tap(pg, at); // locked
+			assert.match(await pg.eval(classOf(sel)), /\blocked\b/, `precondition: ${sel} locked`);
+		}
 
 		await pg.eval(`document.getElementById("hid-type-input").focus()`);
 		await pg.eval("new Promise((r) => setTimeout(r, 250))");
