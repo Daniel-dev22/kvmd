@@ -72,12 +72,17 @@ export function Keypad(__el_keypad, __sendKey) {
 		return (keys !== undefined && keys.length > 0 && __isActive(keys[0]));
 	};
 
+	// Returns how many codes it actually let go of, which is what tells a
+	// caller whether the host's modifier state has just changed underneath it.
 	self.releaseAll = function() {
+		let released = 0;
 		for (let code in __keys) {
 			if (self.isCodeActive(code)) {
 				self.emit(code, false);
+				released += 1;
 			}
 		}
+		return released;
 	};
 
 	self.emit = function(code, state) {

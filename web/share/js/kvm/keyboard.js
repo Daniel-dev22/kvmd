@@ -24,6 +24,7 @@ import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
 import {UI_MOBILE} from "../ui.js";
+import {hidSilences} from "./mute.js";
 import {printText, setKeyboardState} from "./print.js";
 import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
@@ -43,7 +44,11 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	/************************************************************************/
 
 	var __ws = null;
-	var __online = true;
+	// true / false / null are kvmd's three answers -- ready, inactive or busy,
+	// and the whole emulator gone. `undefined` is the fourth state the page has
+	// always been in and never had a name for: NOT TOLD YET. It used to start
+	// as `true`, which is a claim about a HID nothing had spoken to.
+	var __online = undefined;
 
 	var __caps_led = false;
 
@@ -62,7 +67,7 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		// the same two questions of the same keyboard the bar does.
 		setKeyboardState({
 			"dropHeldKeys": self.releaseAll,
-			"ready": () => __hidReady(),
+			"notReady": () => (__hidReady() ? null : __whyNotReady()),
 		});
 
 		__initLayers();
@@ -131,8 +136,10 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 			// the last one's answer is not an answer: kvmd sends the whole
 			// state the moment the socket opens, so this is unknown for about
 			// a round trip. Carrying the old value across a reconnect is how a
-			// gadget that went offline while we were away reads as ready.
-			__online = null;
+			// gadget that went offline while we were away reads as ready --
+			// and `null` would be the opposite lie, a red LED and an "emulator
+			// offline" on a PiKVM that is perfectly well.
+			__online = undefined;
 		}
 		__updateOnlineLeds();
 	};
@@ -159,8 +166,22 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		}
 	};
 
+	// Everything the page is holding down on the host, let go.
+	//
+	// The magic-shortcut composer is the other thing that holds keys: while it
+	// is armed it deliberately SWALLOWS modifier releases (see __sendKey), so
+	// that letting go of Ctrl on a real keyboard does not let go of it on the
+	// host. Clearing the board alone therefore un-latches the key on screen and
+	// leaves it held on the host -- with `isCodeActive` now false, no later
+	// release can ever emit it either. Its own release path bypasses __sendKey,
+	// so it is the one that has to run.
 	self.releaseAll = function() {
-		__keypad.releaseAll();
+		let released = 0;
+		if (__magic_started || __magic_mods.length > 0) {
+			released += __magic_mods.length;
+			__releaseMagicModifiers();
+		}
+		return (released + __keypad.releaseAll());
 	};
 
 	self.emit = function(code, state) {
@@ -177,7 +198,12 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		let title = "Keyboard free";
 
 		if (__ws) {
-			if (__online === null) {
+			if (__online === undefined) {
+				// Connected, and not told anything yet -- about a round trip.
+				// Either answer painted here would be a guess, and this one is
+				// re-rendered the moment the first state event lands.
+				title = (is_captured ? "Keyboard captured, connecting" : "Keyboard free, connecting");
+			} else if (__online === null) {
 				led = "led-red";
 				title = (is_captured ? "Keyboard captured, emulator offline" : "Keyboard free, emulator offline");
 			} else if (__online) {
@@ -489,13 +515,22 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 
 	// Can a keystroke leave at all?
 	//
-	// A FACT, not an inference: __innerSendKey sends nothing without a socket,
-	// so a key is definitely lost -- and a key lost while the text around it
-	// still goes out over HTTP is not a dropped keystroke but a corrupted
-	// line, which is `helo` plus a correction arriving as `helolo`. Typing
-	// stops until the session's own reconnect loop (session.js, every ~1s)
-	// hands back a socket; that path does not run through here.
-	var __linkUp = () => (__ws !== null);
+	// One direction of it is a FACT: with no socket, or one the engine has
+	// already closed, __innerSendKey sends nothing, so the key is definitely
+	// lost -- and a key lost while the text around it still goes out over HTTP
+	// is not a dropped keystroke but a corrupted line, which is `helo` plus a
+	// correction arriving as `helolo`. Typing stops until the session's own
+	// reconnect loop (session.js, every ~1s) hands back a socket; that path
+	// does not run through here.
+	//
+	// ⚠ The other direction is NOT a fact and cannot be made one from the
+	// browser. A half-open socket -- the far side gone, no FIN, which is what a
+	// phone changing networks produces -- still reads OPEN and still accepts
+	// send() silently. session.js's heartbeat bounds that at 15 missed pings,
+	// so the window is up to ~15s wide, and inside it this answers "up" and the
+	// keys go nowhere. Closing it properly needs an ack per event, which the
+	// protocol does not have.
+	var __linkUp = () => (__ws !== null && __ws.readyState === WebSocket.OPEN);
 
 	// Will the HID do anything with it if it does?
 	//
@@ -513,6 +548,18 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	// So it is REPORTED, not enforced.
 	var __hidReady = () => (__online === true);
 
+	// Why it will not, in the LED's own vocabulary: the page must not tell the
+	// user the emulator is offline while the LED beside it says busy.
+	var __whyNotReady = function() {
+		if (__online === null) {
+			return "Emulator offline"; // The red LED
+		}
+		if (__online === false) {
+			return "Keyboard inactive/busy"; // The yellow one
+		}
+		return "Still connecting"; // Not told yet -- see setSocket()
+	};
+
 	// What happened to the keystrokes, in WORDS.
 	//
 	// A 2s red border was the whole signal before this: colour only, nothing
@@ -520,11 +567,19 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	// wrong. It matters more here than on a desktop -- the queue drops whatever
 	// was behind a failure, the video is the only other evidence, and with the
 	// navbar collapsed into its button the keyboard LED is not even on screen.
-	var __sayTyping = function(text) {
+	// `urgent` means something was DROPPED, and always takes the line. A
+	// warning does not: it is true for as long as the state lasts and is asked
+	// on every key event, so letting it re-arm the timer would pin the line up
+	// for the whole burst, and letting it replace a failure would take a status
+	// code off the screen before it could be read.
+	var __sayTyping = function(text, urgent=false) {
 		let el = $("hid-type-input");
 		let el_status = $("hid-type-status");
 		if (el === null || el_status === null) {
 			return; // Desktop pages do not render the typing bar
+		}
+		if (!urgent && __failed_timer !== null) {
+			return;
 		}
 		el.setAttribute("data-failed", "1");
 		el_status.innerText = text;
@@ -543,7 +598,7 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	// to "did that arrive?", asked at the moment the user asks it.
 	var __warnIfNotReady = function() {
 		if (!__hidReady()) {
-			__sayTyping("Emulator offline \u2014 this may not have arrived");
+			__sayTyping(`${__whyNotReady()} \u2014 this may not have arrived`);
 		}
 	};
 
@@ -612,10 +667,10 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				if (status > 0) {
 					// The body can hold what the user typed, so it is not logged.
 					tools.error("Keyboard: typing failed with HTTP", status);
-					__sayTyping(`Not sent \u2014 PiKVM error ${status}`);
+					__sayTyping(`Not sent \u2014 PiKVM error ${status}`, true);
 				} else {
 					tools.error("Keyboard: typing failed: the HID connection is down");
-					__sayTyping("Not sent \u2014 no connection to PiKVM");
+					__sayTyping("Not sent \u2014 no connection to PiKVM", true);
 				}
 			},
 		});
@@ -845,7 +900,7 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				"finish": (allow_finish && $("hid-keyboard-bad-link-switch").checked),
 			},
 		};
-		if (__ws && !$("hid-mute-switch").checked) {
+		if (__ws && !hidSilences(ev)) {
 			__ws.sendHidEvent(ev);
 		}
 		delete ev.event.finish;

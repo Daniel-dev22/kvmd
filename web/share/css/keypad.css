@@ -342,33 +342,56 @@ div.keypad-type {
 	align-items: stretch;
 	padding-top: 6px;
 	border-top: var(--border-menu-item-content-top-thin);
-	/* The anchor for the status line above it. */
-	position: relative;
 }
 
-/* What happened to the keystrokes, in words.
-   Above the row rather than in it: the row is the input and two 46px buttons
-   with nothing to spare at 390px, and a line that pushed them down would move
-   the console every time something failed. Over the video it covers no control
-   and costs no layout, and it is where the user is already looking.
-   `:not(:empty)` rather than a second attribute -- the text IS the state. */
+/* The field and its message are one box, so the message can cover the FIELD
+   and nothing else. 📏 Above the row it covered three keys of the strip --
+   Ctrl, Esc and Tab -- and, being on top of them, swallowed their taps as
+   well; below the row it would push the sheet 25px taller and move the console
+   every time something failed. The field is the one element whose contents are
+   transient by design: everything typed into it has already left. */
+:root[data-ui="mobile"] div.keypad-type div.keypad-type-field {
+	display: flex;
+	position: relative;
+	flex: 1;
+	min-width: 0;
+}
+
+/* What happened to the keystrokes, in words. `:not(:empty)` rather than a
+   second attribute -- the text IS the state.
+
+   The box is kept in the tree even while empty, and only its COLOURS are
+   conditional: a live region that is display:none at the instant its text is
+   set is the pattern screen readers announce least reliably, and announcing it
+   is half the point of replacing a coloured border. Empty, it paints nothing
+   and takes nothing. */
 div#hid-type-status {
 	display: none;
 }
 
-:root[data-ui="mobile"] div.keypad-type div#hid-type-status:not(:empty) {
-	display: block;
+:root[data-ui="mobile"] div.keypad-type div#hid-type-status {
+	display: flex;
 	position: absolute;
-	left: 0;
-	right: 0;
-	bottom: 100%;
-	padding: 4px 8px;
-	border-radius: 6px 6px 0 0;
+	inset: 0;
+	align-items: center;
+	justify-content: center;
+	padding: 0 8px;
+	border-radius: 6px;
+	/* A status never takes a tap. Over the field it would otherwise eat the
+	   one that puts the caret back. */
+	pointer-events: none;
+	/* div.window sets `white-space: nowrap` for its chrome, and a sentence
+	   inherits it: the message ran off both ends of the field instead of
+	   wrapping. 📏 Caught by looking at a screenshot, not by any assertion. */
+	white-space: normal;
+	font-size: 13px;
+	line-height: 1.25;
+	text-align: center;
+}
+
+:root[data-ui="mobile"] div.keypad-type div#hid-type-status:not(:empty) {
 	color: var(--cs-typing-problem-fg);
 	background-color: var(--cs-typing-problem-bg);
-	font-size: 13px;
-	line-height: 1.3;
-	text-align: center;
 }
 
 :root[data-ui="mobile"] div.keypad-type input {

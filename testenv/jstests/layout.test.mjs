@@ -615,6 +615,9 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 
 	test("erasing does not retype the line", async () => {
 		const pg = await openKeyboard(390, {"session": true});
+		// The host record is per SERVER, not per page, and open() in this file
+		// deliberately does not reset it -- so measure the tail this test adds.
+		const before = server.host.length;
 		const sent = await pg.eval(`(() => {
 			window.__sent = [];
 			const Real = window.XMLHttpRequest;
@@ -631,9 +634,15 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 			el.dispatchEvent(new Event("input", {bubbles: true}));
 			return window.__sent;
 		})()`);
+		const host = (await server.waitHost(before + 3)).slice(before);
 		await pg.close();
 		// A deletion is a Backspace key event, never a re-print of the text.
 		assert.deepEqual(sent, ["hello"], `erasing sent: ${JSON.stringify(sent)}`);
+		// ...and it is the half this test could not see until the appliance
+		// stub existed: with only the XHR spy, a build that dropped the
+		// Backspace entirely passed.
+		assert.deepEqual(host, ["print \"hello\"", "key Backspace down", "key Backspace up"],
+			`the host did not receive the correction: ${JSON.stringify(host)}`);
 	});
 
 	// Focus events are the whole mechanism here, and a headless page that is not

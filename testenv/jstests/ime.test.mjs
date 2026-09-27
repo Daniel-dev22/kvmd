@@ -139,7 +139,7 @@ async function hostSettled(pg, want, ms = 2000) {
 }
 
 // Waits for a condition to become true rather than sampling it once after a
-// guessed delay. The failure cue clears itself after 2s, so a single late
+// guessed delay. The failure cue clears itself after a few seconds, so a single late
 // sample races its own expiry -- which is a flake that only shows under load.
 async function waitFor(pg, expression, ms = 2000) {
 	const until = Date.now() + ms;

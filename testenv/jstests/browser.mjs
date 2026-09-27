@@ -76,6 +76,11 @@ function wsFrame(opcode, payload) {
 // Client to server: always masked, and arriving in whatever chunks TCP felt
 // like -- so a frame is only handed on once all of it is here. Returning on a
 // short buffer without consuming it is what makes that work.
+// Nothing the page sends is anywhere near this; a frame that claims to be is
+// a decode that has gone wrong, and silently waiting for bytes that will never
+// come turns into "the page never sent the key" three assertions later.
+const WS_MAX_FRAME = 1 << 20;
+
 function wsReader(onFrame) {
 	let buf = Buffer.alloc(0);
 	return function(chunk) {
@@ -84,6 +89,7 @@ function wsReader(onFrame) {
 			if (buf.length < 2) {
 				return;
 			}
+			const fin = ((buf[0] & 0x80) !== 0);
 			const opcode = (buf[0] & 0x0f);
 			const masked = ((buf[1] & 0x80) !== 0);
 			let len = (buf[1] & 0x7f);
@@ -101,6 +107,9 @@ function wsReader(onFrame) {
 				len = Number(buf.readBigUInt64BE(2));
 				off = 10;
 			}
+			if (len > WS_MAX_FRAME) {
+				throw new Error(`the appliance stub decoded a ${len}-byte frame: the reader has lost sync`);
+			}
 			if (buf.length < off + (masked ? 4 : 0) + len) {
 				return;
 			}
@@ -113,6 +122,12 @@ function wsReader(onFrame) {
 				}
 			}
 			buf = buf.subarray(off + len);
+			if (!fin || opcode === 0x0) {
+				// Nothing here sends anything big enough to fragment, so a
+				// fragment means the decode is wrong -- and quietly handing on
+				// half a frame would put a mis-read key in the host record.
+				throw new Error("the appliance stub received a fragmented frame, which nothing should send");
+			}
 			onFrame(opcode, payload);
 		}
 	};
@@ -241,7 +256,7 @@ export async function serveWeb() {
 		}
 	});
 
-	server.on("upgrade", (req, sock) => {
+	server.on("upgrade", (req, sock, head) => {
 		const rel = req.url.split("?")[0];
 		const key = req.headers["sec-websocket-key"];
 		if (!control.session || !rel.endsWith("/api/ws") || !key) {
@@ -255,7 +270,7 @@ export async function serveWeb() {
 		sockets.add(sock);
 		sock.on("close", () => sockets.delete(sock));
 		sock.on("error", () => sockets.delete(sock));
-		sock.on("data", wsReader(function(opcode, payload) {
+		const read = wsReader(function(opcode, payload) {
 			if (opcode === 0x8) { // Close
 				sock.end(wsFrame(0x8, Buffer.alloc(0)));
 				return;
@@ -281,7 +296,14 @@ export async function serveWeb() {
 			}
 			// Moves, wheels and relative deltas are deliberately not recorded:
 			// a single drag is hundreds of them and would bury everything else.
-		}));
+		});
+		sock.on("data", read);
+		// Bytes that arrived in the same segment as the handshake. Node hands
+		// them over separately and they are never re-emitted as data; dropping
+		// them would lose a frame and blame the page for not sending it.
+		if (head && head.length > 0) {
+			read(head);
+		}
 		// kvmd sends the whole state the moment the socket opens, so the page
 		// is never left guessing what it is connected to.
 		if (control.hidSnapshot) {
@@ -302,7 +324,12 @@ export async function serveWeb() {
 		// wait for; and the grace period after it is what lets an event that
 		// should NOT have followed show up in the assertion instead of being
 		// missed by a race.
-		"waitHost": async (want, ms = 2000) => {
+		// 📏 The budget is generous on purpose. A positive wait returns the
+		// moment the count is reached, so it costs nothing when the machine is
+		// quiet -- and on a machine under someone else's build it is the
+		// difference between a real answer and an empty list. Measured: this
+		// suite was run at load average 226 and read three events as none.
+		"waitHost": async (want, ms = 5000) => {
 			const until = Date.now() + ms;
 			while (Date.now() < until && (want <= 0 || host.length < want)) {
 				await new Promise((done) => setTimeout(done, 25));

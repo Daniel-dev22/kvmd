@@ -27,6 +27,8 @@ import {tools, $} from "../tools.js";
 import {HOVER_QUERY, UI_MOBILE} from "../ui.js";
 import {wm} from "../wm.js";
 import {Keypad} from "../keypad.js";
+
+import {hidSilences} from "./mute.js";
 import {TouchGestures} from "../gestures.js";
 import {makeZoom, containFit, ZOOM_MIN, ZOOM_MAX} from "./zoom.js";
 import {changedRegion, shouldFollow, followPan, FOLLOW_COLS, FOLLOW_ROWS, FOLLOW_HZ, FOLLOW_MANUAL_HOLD_MS} from "./follow.js";
@@ -857,7 +859,9 @@ export function Mouse(__getGeometry, __recordWsEvent) {
 
 	var __sendEvent = function(ev_type, ev) {
 		ev = {"event_type": ev_type, "event": ev};
-		if (__ws && !$("hid-mute-switch").checked) {
+		// A latched Left is how a finger drags on the host, and muting while
+		// one is down must not leave the button held there -- see mute.js.
+		if (__ws && !hidSilences(ev)) {
 			__ws.sendHidEvent(ev);
 		}
 		__recordWsEvent(ev);

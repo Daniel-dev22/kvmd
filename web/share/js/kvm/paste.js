@@ -25,7 +25,7 @@
 
 import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
-import {printText, hidReadyToType} from "./print.js";
+import {printText, hidNotReadyReason} from "./print.js";
 
 
 export function Paste(__recorder) {
@@ -83,7 +83,11 @@ export function Paste(__recorder) {
 				let keymap = $("hid-pak-keymap-selector").value;
 				let delay = $("hid-pak-delay-slider").valueAsNumber;
 
-				tools.debug(`HID: paste-as-keys ${keymap}: ${text}`);
+				// The length, never the body: this is where people paste
+				// passwords -- the panel ships a switch that hides them on
+				// screen -- and ?debug=1 is one link away. The bar's own path
+				// has never logged it.
+				tools.debug(`HID: paste-as-keys ${keymap}: ${text.length} characters`);
 
 				printText(text, keymap, delay / 1000, function(http) {
 					tools.el.setEnabled($("hid-pak-text"), true);
@@ -106,9 +110,9 @@ export function Paste(__recorder) {
 				// exactly like one that worked. Said here rather than invented
 				// as a new surface: the confirmation is already the moment the
 				// user is deciding whether to do it.
-				let doubt = (hidReadyToType() ? "" : `
-					<br><br>The keyboard emulator is offline,
-					so this may not arrive.
+				let why = hidNotReadyReason();
+				let doubt = (why === null ? "" : `
+					<br><br>${tools.escape(why)}: this may not arrive.
 				`);
 				wm.confirm(`
 					You're going to paste ${text.length} character${text.length ? "s" : ""}.<br>

@@ -463,23 +463,24 @@ mixin ck_row(layer)
 		//- Sits at the bottom so it is directly above the system keyboard when
 		//- that opens. 16px or larger, or iOS zooms the page on focus.
 		.keypad-type
-			input#hid-type-input(
-				type="text"
-				inputmode="text"
-				enterkeyhint="enter"
-				autocomplete="off"
-				autocorrect="off"
-				autocapitalize="off"
-				spellcheck="false"
-				placeholder="Tap to type on the host"
-				aria-label="Type on the host"
-			)
-			//- What happened to the keystrokes, in words rather than in a
-			//- colour. It sits ABOVE the row -- over the bottom of the video,
-			//- where the eye already is -- so it covers no control and costs
-			//- no layout; and it is announced, because a 2s border is nothing
-			//- at all to a screen reader. Empty unless something went wrong.
-			div#hid-type-status(role="status" aria-live="polite")
+			//- The field and what happened to what was typed in it share one
+			//- box, so the message can cover the FIELD and nothing else.
+			.keypad-type-field
+				input#hid-type-input(
+					type="text"
+					inputmode="text"
+					enterkeyhint="enter"
+					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+					spellcheck="false"
+					placeholder="Tap to type on the host"
+					aria-label="Type on the host"
+				)
+				//- What happened to the keystrokes, in words rather than in a
+				//- colour, and announced -- a 2s border is nothing at all to a
+				//- screen reader. Empty unless something went wrong.
+				div#hid-type-status(role="status" aria-live="polite")
 			//- The way back to the full board. It lives here rather than in the
 			//- layer picker because the picker is a whole row of its own, and
 			//- in typing mode its only job is this one button.

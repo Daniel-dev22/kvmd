@@ -33,6 +33,12 @@
 import {tools} from "../tools.js";
 
 
+// Milliseconds. Long enough for kvmd to have read a websocket frame written
+// just before it, short enough that nobody feels it, and paid ONCE per burst
+// rather than per character.
+const HANDOVER_MS = 10;
+
+
 // The keyboard, as far as typing text is concerned: what the on-screen board
 // is holding, and whether the HID will do anything with what it is sent.
 //
@@ -54,11 +60,13 @@ function __keyboard() {
 	return __kbd;
 }
 
-// Whether a keystroke sent right now would reach the host, as far as the page
-// can tell. Not a precondition for typing -- see the 🔴 note in keyboard.js --
-// but the answer a caller needs to avoid claiming that it arrived.
-export function hidReadyToType() {
-	return __keyboard().ready();
+// Why a keystroke sent right now might not reach the host -- in the same words
+// the keyboard LED uses -- or null when nothing says it would not.
+//
+// Not a precondition for typing: see the 🔴 note in keyboard.js. It is the
+// answer a caller needs to avoid claiming that it arrived.
+export function hidNotReadyReason() {
+	return __keyboard().notReady();
 }
 
 
@@ -99,7 +107,7 @@ export function hidReadyToType() {
 // which is how a replayed recording asks for the server's own defaults.
 export function printText(text, keymap, delay, on_done, opts={}) {
 	let {timeout = (7 * 24 * 3600), slow = null} = opts;
-	__keyboard().dropHeldKeys();
+	let released = __keyboard().dropHeldKeys();
 	let params = {"limit": 0};
 	if (keymap !== null) {
 		params["keymap"] = keymap;
@@ -110,5 +118,23 @@ export function printText(text, keymap, delay, on_done, opts={}) {
 	if (slow !== null) {
 		params["slow"] = slow;
 	}
-	tools.httpPost("api/hid/print", params, on_done, text, "text/plain", timeout);
+	let post = () => tools.httpPost("api/hid/print", params, on_done, text, "text/plain", timeout);
+	if (released > 0) {
+		// The release left on the websocket and this request goes out on a
+		// second connection; nothing orders one against the other, because
+		// kvmd handles them as independent tasks. The release is written first
+		// and is microseconds ahead, which is not a guarantee -- and losing
+		// that race does not chord one character, it chords the WHOLE burst:
+		// `send_key_events` only yields between keys when a delay was asked
+		// for (kvmd/plugins/hid/__init__.py:151-155), so with the bar's
+		// delay=0 the entire text goes into the HID queue in one go.
+		//
+		// So the request is not even ISSUED until the frame has had a head
+		// start. Done here rather than by asking the server for a per-key
+		// delay, which would have cost 10ms per CHARACTER -- fifty seconds on
+		// a five-thousand-character paste.
+		setTimeout(post, HANDOVER_MS);
+	} else {
+		post();
+	}
 }
