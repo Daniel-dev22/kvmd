@@ -24,7 +24,7 @@ import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
 import {UI_MOBILE} from "../ui.js";
-import {hidSilences} from "./mute.js";
+import {hidMuted} from "./mute.js";
 import {printText, setKeyboardState} from "./print.js";
 import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
@@ -36,6 +36,12 @@ const TYPING_TIMEOUT_MS = 15000;
 // Long enough to READ. The old signal was a 2s border, and a border does not
 // have to be read.
 const PROBLEM_SHOWN_MS = 4000;
+
+// Named once because two paths say it -- a burst of text and a lone Enter fail
+// in different places and must not word the same state differently. "nothing
+// was sent" rather than "may not have arrived": the mute switch is a fact the
+// page can check, not an inference about the far end.
+const MUTED_SAID = "Muted \u2014 nothing was sent";
 
 
 export function Keyboard(__recordWsEvent, __recordPrintEvent) {
@@ -593,12 +599,32 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		}, PROBLEM_SHOWN_MS);
 	};
 
-	// Said when the page can see that the HID will throw the keystroke away.
-	// Fired per burst rather than once per session on purpose: it is the answer
-	// to "did that arrive?", asked at the moment the user asks it.
-	var __warnIfNotReady = function() {
+	// Everything the page can see standing between a keystroke and the host, in
+	// the words of whatever is doing it -- or null when nothing is.
+	//
+	// The mute branch does NOT gate anything: the switch is enforced by the two
+	// transports (session.js, print.js) and would be obeyed with every line of
+	// this deleted. What is decided here is only what the user is TOLD, which is
+	// the half a transport cannot do -- it has no idea which surface it is
+	// carrying for. The switch takes precedence over the HID's readiness because
+	// it is a fact and readiness is an inference.
+	var __whyBlocked = function() {
+		if (hidMuted()) {
+			return MUTED_SAID;
+		}
 		if (!__hidReady()) {
-			__sayTyping(`${__whyNotReady()} \u2014 this may not have arrived`);
+			return `${__whyNotReady()} \u2014 this may not have arrived`;
+		}
+		return null;
+	};
+
+	// Said when the page can see the keystroke will not get there. Fired per
+	// burst rather than once per session on purpose: it is the answer to "did
+	// that arrive?", asked at the moment the user asks it.
+	var __warnBeforeSend = function() {
+		let why = __whyBlocked();
+		if (why !== null) {
+			__sayTyping(why);
 		}
 	};
 
@@ -610,11 +636,7 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 
 		__queue = makeTypingQueue({
 			"print": function(text, keymap, done) {
-				// Work queued before the HID was muted must not leak out after it.
-				if ($("hid-mute-switch").checked) {
-					done(true, null);
-					return;
-				}
+				__warnBeforeSend();
 				if (!__linkUp()) {
 					// HTTP can still be up while the socket is not, and then
 					// the text would land while the Backspace behind it was
@@ -622,8 +644,16 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 					done(false, null);
 					return;
 				}
-				__warnIfNotReady();
 				printText(text, keymap, 0, function(http) {
+					if (http === null) {
+						// Muted: print.js sent nothing. Work queued before the
+						// switch was thrown must not leak out after it either, so
+						// what is still behind this goes with it -- and it is not
+						// a failure to announce, because __warnBeforeSend has
+						// already said what happened.
+						done(false, null);
+						return;
+					}
 					if (http.status === 200) {
 						// The Text menu records its prints; a recording made through
 						// the bar that held the Enters and none of the text would
@@ -641,7 +671,7 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				if (!__linkUp()) {
 					return false;
 				}
-				__warnIfNotReady();
+				__warnBeforeSend();
 				// The board goes down for a key exactly as it does for text:
 				// Backspace under a latched Ctrl is delete-word in a shell, and
 				// Enter under it is not Enter. This is the other transport --
@@ -668,6 +698,11 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 					// The body can hold what the user typed, so it is not logged.
 					tools.error("Keyboard: typing failed with HTTP", status);
 					__sayTyping(`Not sent \u2014 PiKVM error ${status}`, true);
+				} else if (hidMuted()) {
+					// The page refused on the user's own switch, which is not an
+					// error and is not the link: saying "no connection to PiKVM"
+					// here would send someone debugging their network.
+					__sayTyping(MUTED_SAID, true);
 				} else {
 					tools.error("Keyboard: typing failed: the HID connection is down");
 					__sayTyping("Not sent \u2014 no connection to PiKVM", true);
@@ -782,11 +817,10 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				// preventDefault stops the single-line field submitting, and is
 				// why no input event follows this to double the Enter.
 				ev.preventDefault();
-				if (!$("hid-mute-switch").checked) {
-					// Queued, not sent: Enter runs the command, so it must not
-					// reach the host before the characters of that command do.
-					__queue.push([{"key": "Enter", "n": 1}]);
-				}
+				// Queued, not sent: Enter runs the command, so it must not reach
+				// the host before the characters of that command do. Whether it
+				// leaves at all is the socket's decision, one layer down.
+				__queue.push([{"key": "Enter", "n": 1}]);
 				__composing = false;
 				__resetField(el);
 			}
@@ -855,9 +889,11 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		let now = el.value;
 		__typed = now;
 		__scheduleReset(el);
-		if ($("hid-mute-switch").checked) {
-			return;
-		}
+		// Decoded and queued whatever the mute switch says: the transports refuse,
+		// the queue drops what was behind the refusal, and the bar says which
+		// switch did it. A third copy of the rule here would gate the other two
+		// out of reach -- deleting either would then change nothing anybody could
+		// measure, which is how a guard rots.
 		__queue.push(decodeEdit({"was": was, "now": now, "input_type": input_type}));
 	};
 
@@ -900,7 +936,12 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				"finish": (allow_finish && $("hid-keyboard-bad-link-switch").checked),
 			},
 		};
-		if (__ws && !hidSilences(ev)) {
+		// Muted or not is sendHidEvent's to decide -- every writer of the socket
+		// goes through it, and this is only one of three. ⚠ The line above says
+		// the KEYBOARD emitted this, which is not the same as the host getting
+		// it: it has always been logged with no socket at all. What reached the
+		// wire is read from the wire -- browser.mjs decodes the frames.
+		if (__ws) {
 			__ws.sendHidEvent(ev);
 		}
 		delete ev.event.finish;

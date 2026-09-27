@@ -26,6 +26,7 @@
 import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
 
+import {hidSilences} from "./mute.js";
 import {Info} from "./info.js";
 import {Recorder} from "./recorder.js";
 import {Hid} from "./hid.js";
@@ -72,7 +73,7 @@ export function Session() {
 		tools.httpGet("api/auth/check", null, function(http) {
 			if (http.status === 200) {
 				__ws = new WebSocket(tools.makeWsUrl("api/ws"));
-				__ws.sendHidEvent = (ev) => __sendHidEvent(__ws, ev.event_type, ev.event);
+				__ws.sendHidEvent = (ev) => __sendHidEvent(__ws, ev);
 				__ws.binaryType = "arraybuffer";
 				__ws.onopen = __wsOpenHandler;
 				__ws.onmessage = async (ev) => {
@@ -190,7 +191,22 @@ export function Session() {
 
 	var __ascii_encoder = new TextEncoder("ascii");
 
-	var __sendHidEvent = function(ws, ev_type, ev) {
+	// The one way a HID event leaves this page over the socket -- keyboard.js,
+	// mouse.js and a replayed recording all arrive here -- so this is where
+	// "Mute KB/M" is applied. Putting it in the callers is what left recorder.js
+	// replaying keys, clicks and mouse moves onto the host while the switch said
+	// it would not; a writer added later cannot forget a rule it never has to
+	// remember. A RELEASE still goes out while muted -- see mute.js.
+	var __sendHidEvent = function(ws, ev) {
+		if (hidSilences(ev)) {
+			// The callers' own debug lines say what they EMITTED -- they are
+			// written with no socket at all -- so the only record of what the
+			// wire actually carried is here.
+			tools.debug("Session: muted, not sent:", ev.event_type);
+			return;
+		}
+		let ev_type = ev.event_type;
+		ev = ev.event;
 		if (ev_type === "key") {
 			let data = __ascii_encoder.encode("\x01\x00" + ev.key);
 			data[1] = (ev.state ? 1 : 0);

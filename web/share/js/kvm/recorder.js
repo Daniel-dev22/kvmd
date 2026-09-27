@@ -27,6 +27,7 @@ import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
 
 import {printText} from "./print.js";
+import {hidMuted} from "./mute.js";
 
 
 export function Recorder() {
@@ -117,6 +118,19 @@ export function Recorder() {
 	};
 
 	var __playRecord = function() {
+		if (hidMuted()) {
+			// Every event a script replays is a keyboard or mouse event, so
+			// muted there is nothing left for it to do -- and the transports
+			// would drop the lot silently while the LED spun and the counters
+			// ran down, which is a replay that claims to have played. Refused
+			// where the user pressed the button instead. Flipping the switch
+			// mid-replay is caught further down, by the print that then refuses.
+			wm.info(
+				"The script was not played: <b>Mute KB/M</b> is on, so the page is not"
+				+ " sending keyboard or mouse events.",
+			);
+			return;
+		}
 		__play_timer = setTimeout(() => __runEvents(0), 0);
 		__refresh();
 	};
@@ -307,7 +321,16 @@ export function Recorder() {
 					(ev.event.keymap === undefined ? null : ev.event.keymap),
 					(ev.event.delay === undefined ? null : ev.event.delay / 1000),
 					function(http) {
-						if (http.status === 413) {
+						if (http === null) {
+							// Muted part-way through: print.js refused, so the rest
+							// of the script would type into a host that receives
+							// none of it. Stopped, and said, rather than run on.
+							wm.info(
+								"The script was stopped: <b>Mute KB/M</b> is on, so the page is"
+								+ " not sending keyboard or mouse events.",
+							);
+							__stopProcess();
+						} else if (http.status === 413) {
 							wm.error("Too many text for paste!");
 							__stopProcess();
 						} else if (http.status !== 200) {

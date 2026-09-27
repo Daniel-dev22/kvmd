@@ -31,6 +31,7 @@
 
 
 import {tools} from "../tools.js";
+import {hidMuted} from "./mute.js";
 
 
 // Milliseconds. Long enough for kvmd to have read a websocket frame written
@@ -105,8 +106,29 @@ export function hidNotReadyReason() {
 //
 // `keymap`, `delay` and `opts.slow` are omitted from the request when null,
 // which is how a replayed recording asks for the server's own defaults.
+//
+// ⚠ `on_done` is called with **null** when the page itself refused and no
+// request was made -- today that means "Mute KB/M" is on. Every caller has to
+// answer it: an HTTP status is what kvmd said, and there is no kvmd in this
+// one. Saying nothing leaves a control that visibly does nothing.
 export function printText(text, keymap, delay, on_done, opts={}) {
 	let {timeout = (7 * 24 * 3600), slow = null} = opts;
+	if (hidMuted()) {
+		// "Mute KB/M -- don't send keyboard & mouse events", and text typed by
+		// api/hid/print is keyboard events: the server turns every character
+		// into scancodes and pushes them into the same HID. Checked HERE, where
+		// all three callers already are, rather than in each of them -- only the
+		// typing bar had remembered, so the Text panel's Paste and a replayed
+		// recording both typed onto the host while the switch was on.
+		//
+		// on_done(null) is the page refusing, not kvmd answering -- the same
+		// convention the typing queue uses for `info`. Nothing has been sent and
+		// NOTHING HAS BEEN TOUCHED: the board is deliberately not put down
+		// first, because dropping the user's latched modifiers for a print that
+		// never happened is a side effect they did not ask for.
+		on_done(null);
+		return;
+	}
 	let released = __keyboard().dropHeldKeys();
 	let params = {"limit": 0};
 	if (keymap !== null) {

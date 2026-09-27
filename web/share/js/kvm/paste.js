@@ -26,6 +26,7 @@
 import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
 import {printText, hidNotReadyReason} from "./print.js";
+import {hidMuted} from "./mute.js";
 
 
 export function Paste(__recorder) {
@@ -43,7 +44,14 @@ export function Paste(__recorder) {
 		tools.storage.bindSimpleSwitch($("hid-pak-ask-switch"), "hid.pak.ask", true);
 
 		tools.storage.bindSimpleSwitch($("hid-pak-secure-switch"), "hid.pak.secure", false, function(value) {
-			$("hid-pak-text").style.setProperty("-webkit-text-security", (value ? "disc" : "none"));
+			// One attribute, one preference, every field that types on the host --
+			// see main.css. It was an inline style on this one box, which is why
+			// the compact layout's typing bar, the field a phone actually types
+			// passwords into, showed them in 16px while the switch said they were
+			// hidden. The switch is the Text menu's to own (it is rendered there);
+			// what it COVERS is a stylesheet's, so a third field cannot need a
+			// second copy of this callback.
+			document.documentElement.toggleAttribute("data-hid-secure", value);
 		});
 
 		tools.storage.bindSimpleSlider($("hid-pak-delay-slider"), "hid.pak.delay", 0, 200, 20, 20, function (value) {
@@ -93,6 +101,19 @@ export function Paste(__recorder) {
 					tools.el.setEnabled($("hid-pak-text"), true);
 					tools.el.setEnabled($("hid-pak-button"), true);
 					tools.el.setEnabled($("hid-pak-keymap-selector"), true);
+					if (http === null) {
+						// print.js refused on "Mute KB/M" and sent nothing. Said
+						// here rather than left silent: the switch is two menus
+						// away in System, and a Paste that visibly does nothing is
+						// indistinguishable from a PiKVM that has stopped
+						// answering. The text STAYS in the box -- it was never
+						// typed, and clearing it would throw away the only copy.
+						wm.info(
+							"Nothing was pasted: <b>Mute KB/M</b> is on, so the page is not"
+							+ " sending keyboard or mouse events.<br><br>Your text is still in the box.",
+						);
+						return;
+					}
 					$("hid-pak-text").value = "";
 					if (http.status === 413) {
 						wm.error("Too many text for paste!");
@@ -104,7 +125,13 @@ export function Paste(__recorder) {
 				});
 			};
 
-			if ($("hid-pak-ask-switch").checked) {
+			// Muted, there is nothing to be sure about: printText will refuse
+			// and the callback above says so, which is one dialog instead of
+			// "are you sure?" followed by "it did not happen". This decides
+			// only whether to ASK -- deleting it puts the pointless question
+			// back and changes nothing about what leaves the page, which is
+			// print.js's to refuse and not paste.js's to remember.
+			if ($("hid-pak-ask-switch").checked && !hidMuted()) {
 				// api/hid/print answers 200 whether or not kvmd could deliver a
 				// single scancode, so a paste into an unenumerated gadget looks
 				// exactly like one that worked. Said here rather than invented

@@ -280,9 +280,28 @@ describe("the typing bar", {"skip": chromiumPath() ? false : "no chromium availa
 		await pg.compose("hello");
 		await pg.commit("hello");
 		await pg.key("Enter", "Enter", 13);
-		const host = await hostSettled(pg, 0, 900);
+		await hostSettled(pg, 0, 900);
 		await pg.close();
-		assert.deepEqual(host, [], `a muted HID received: ${JSON.stringify(host)}`);
+		// 🔴 Read from the WIRE, not from this suite's own record. The record
+		// above is built from `tools.debug`, which says what the keyboard
+		// EMITTED -- it is written with no socket at all -- and muting is
+		// applied one layer below that, in session.js. Against the page's
+		// record this assertion passed on a build where every muted key still
+		// went out; the stub decodes the frames, so it cannot.
+		const wire = server.host;
+		assert.deepEqual(wire.filter((e) => !e.endsWith(" up")), [],
+			`a muted HID received: ${JSON.stringify(wire)}`);
+		// The one thing on the wire is Enter's RELEASE, and it is there on
+		// purpose: mute.js delivers a key-up whatever the switch says, because
+		// the page cannot know whether the host is holding that key, and a mute
+		// that can leave one down on someone's server is not a mute. On the
+		// host it is an all-zero report.
+		//
+		// ⚠ Do NOT "fix" that by releasing only keys the page remembers
+		// pressing: a set like that is empty after a reconnect, which is
+		// exactly when the host IS still holding something.
+		assert.deepEqual(wire, ["key Enter up"],
+			`and nothing else may be on the wire: ${JSON.stringify(wire)}`);
 	});
 
 	// A host that answers instantly makes "in flight" sub-millisecond, and every

@@ -59,6 +59,8 @@ const showKeyboard = async (pg) => {
 };
 
 const CTRL = `#keyboard-compact [data-keypad-code="ControlLeft"]`;
+const ESC = `#keyboard-compact [data-keypad-code="Escape"]`;
+const TAB = `#keyboard-compact [data-keypad-code="Tab"]`;
 const prints = (host) => host.filter((l) => l.startsWith("print ")).map((l) => JSON.parse(l.slice(6))).join("");
 
 describe("a latched modifier never rewrites what is typed", {"skip": chromiumPath() ? false : "no chromium"}, () => {
@@ -714,6 +716,190 @@ describe("the bar never claims a keystroke it could not deliver", {"skip": chrom
 	});
 });
 
+// Dismisses the modal a refusal puts up, and hands back what it said. The
+// dialog is the whole of the message on these surfaces, so a test that does not
+// read it is measuring only that nothing was sent -- which a broken page also
+// manages.
+async function modalSaid(pg, ms = 3000) {
+	const until = Date.now() + ms;
+	for (;;) {
+		const said = await pg.eval(`(() => {
+			const el = document.querySelector(".modal .modal-content");
+			return (el === null ? null : el.innerText);
+		})()`);
+		if (said !== null) {
+			// The OK button by name, not the first button in the row: a
+			// confirmation renders Cancel FIRST, so `.modal-window button`
+			// answers a question with "no" and the test measures a paste that
+			// was declined rather than one that was refused.
+			await pg.eval(`document.querySelector("[data-x-wm-modal-ok]").click()`);
+			return said;
+		}
+		if (Date.now() > until) {
+			return "";
+		}
+		await new Promise((done) => setTimeout(done, 50));
+	}
+}
+
+const MUTE = `document.getElementById("hid-mute-switch")`;
+const setMuted = (pg, on) => pg.eval(`${MUTE}.checked = ${on ? "true" : "false"}`);
+
+describe("the mute switch reaches every writer", {"skip": chromiumPath() ? false : "no chromium"}, () => {
+	// 🔴 What this closes. "Mute KB/M -- don't send keyboard & mouse events"
+	// was applied by whichever module had remembered to ask. Of the three
+	// modules that write the socket, recorder.js did not: a replayed macro
+	// typed, clicked and moved the mouse on the host with the switch on. Of the
+	// three callers of api/hid/print, only the typing bar did: the Text panel's
+	// Paste and a replayed print both typed. The rule was correct, tested, and
+	// reached a third of the traffic.
+	//
+	// It is now applied at the two ways OUT of the page -- sendHidEvent in
+	// session.js and printText in print.js -- so these tests are one per
+	// WRITER, which is the set that has to be enumerated. A writer added later
+	// gets the rule without being asked to remember it.
+	//
+	// The negative control for the whole block is already in this file:
+	// `muting cannot leave a modifier held on the host and clear on screen`
+	// fails if the switch silences a key-UP, which is the one event it must
+	// never stop. Every assertion below would pass on a build that silenced
+	// everything; that one would not.
+
+	test("the bar types nothing, and names the switch that stopped it", async () => {
+		const pg = await open();
+		await showKeyboard(pg);
+		await setMuted(pg, true);
+
+		await pg.commit("ls");
+		const said = await saidWithin(pg);
+		const host = await server.waitHost(0, 400);
+
+		// The positive twin: the same keystrokes, unmuted, DO arrive -- so the
+		// empty list above is the switch and not a test that typed into
+		// nothing.
+		await setMuted(pg, false);
+		await pg.commit("ls");
+		const after = await server.waitHost(1);
+		await pg.close();
+
+		assert.deepEqual(host, [], `nothing may reach the host while muted: ${JSON.stringify(host)}`);
+		assert.match(said, /muted/i,
+			`the bar has to say which switch stopped it, got ${JSON.stringify(said)}`);
+		assert.equal(prints(after), "ls",
+			`the same typing must arrive once unmuted: ${JSON.stringify(after)}`);
+	});
+
+	test("the Text panel pastes nothing, says so, and keeps your text", async () => {
+		const pg = await open();
+		assert.equal(await pg.eval(`document.getElementById("hid-pak-button").disabled`), false,
+			"precondition: the Paste button has to be live, or this measures a disabled button");
+		await setMuted(pg, true);
+		await pg.eval(`document.getElementById("hid-pak-text").value = "hunter2"`);
+		await pg.eval(`document.getElementById("hid-pak-button").click()`);
+
+		const said = await modalSaid(pg);
+		const kept = await pg.eval(`document.getElementById("hid-pak-text").value`);
+		const host = await server.waitHost(0, 400);
+
+		// The positive twin. Unmuted the panel asks first, so the confirmation
+		// is accepted -- which also proves the dialog above was NOT that one.
+		await setMuted(pg, false);
+		await pg.eval(`document.getElementById("hid-pak-button").click()`);
+		const asked = await modalSaid(pg);
+		const after = await server.waitHost(1);
+		await pg.close();
+
+		assert.match(asked, /are you sure/i,
+			`unmuted, the panel asks before pasting: ${JSON.stringify(asked)}`);
+		assert.deepEqual(host, [], `a muted paste must not reach the host: ${JSON.stringify(host)}`);
+		assert.match(said, /mute/i, `the panel has to say why nothing happened, got ${JSON.stringify(said)}`);
+		// It was never typed, so the box is the only copy of it left.
+		assert.equal(kept, "hunter2", "a refused paste must not eat the text it did not send");
+		assert.equal(prints(after), "hunter2",
+			`the same paste must arrive once unmuted: ${JSON.stringify(after)}`);
+	});
+
+	test("a muted paste is not preceded by a confirmation it cannot honour", async () => {
+		// "You're going to paste 7 characters. Are you sure?" -- about a paste
+		// that cannot happen -- and only then the refusal. One dialog, and it
+		// is the true one.
+		const pg = await open();
+		assert.equal(await pg.eval(`document.getElementById("hid-pak-ask-switch").checked`), true,
+			"precondition: the confirmation is on by default, or this test asks nothing");
+		await setMuted(pg, true);
+		await pg.eval(`document.getElementById("hid-pak-text").value = "hunter2"`);
+		await pg.eval(`document.getElementById("hid-pak-button").click()`);
+		const said = await modalSaid(pg);
+		await pg.close();
+		assert.doesNotMatch(said, /are you sure/i,
+			`a paste that cannot happen must not be confirmed first, got ${JSON.stringify(said)}`);
+		assert.match(said, /mute/i, `and the one dialog has to be the refusal, got ${JSON.stringify(said)}`);
+	});
+
+	test("a replayed script's keys stop arriving the moment the switch goes on", async () => {
+		// The writer that had no gate at all: recorder.js calls sendHidEvent
+		// itself. The switch is thrown mid-replay because a replay refuses to
+		// START while muted (below) -- so without this the transport's rule
+		// would be masked by that refusal and could be deleted unnoticed.
+		const pg = await open();
+		await showKeyboard(pg);
+		await pg.eval(`document.getElementById("hid-recorder-record").click()`);
+		await tap(pg, await pg.eval(centre(ESC)));
+		// A recorded gap, which the replay honours -- the window this test
+		// needs to flip the switch inside.
+		await pg.eval("new Promise((r) => setTimeout(r, 900))");
+		await tap(pg, await pg.eval(centre(TAB)));
+		await pg.eval(`document.getElementById("hid-recorder-stop").click()`);
+		const taps = (await server.waitHost(4)).filter((l) => l.startsWith("key "));
+		assert.deepEqual(taps, ["key Escape down", "key Escape up", "key Tab down", "key Tab up"],
+			"precondition: both keys have to have been recorded, from the host's own side");
+
+		const before = server.host.length;
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 250))");
+		await setMuted(pg, true);
+		await pg.eval("new Promise((r) => setTimeout(r, 1200))");
+		const replayed = server.host.slice(before);
+		await pg.close();
+
+		assert.ok(replayed.includes("key Escape down"),
+			`precondition: the replay has to have started: ${JSON.stringify(replayed)}`);
+		// The PRESS is what types; the release is delivered muted or not, so
+		// that a replay cannot leave a key down on the host either.
+		assert.deepEqual(replayed.filter((l) => l === "key Tab down"), [],
+			`a replayed key must not be pressed on the host once muted: ${JSON.stringify(replayed)}`);
+	});
+
+	test("playing a script while muted refuses instead of pretending to play", async () => {
+		const pg = await open();
+		await showKeyboard(pg);
+		await pg.eval(`document.getElementById("hid-recorder-record").click()`);
+		await tap(pg, await pg.eval(centre(ESC)));
+		await pg.eval(`document.getElementById("hid-recorder-stop").click()`);
+		await server.waitHost(2);
+
+		await setMuted(pg, true);
+		const before = server.host.length;
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		const said = await modalSaid(pg);
+		await pg.eval("new Promise((r) => setTimeout(r, 400))");
+		const muted = server.host.slice(before);
+
+		// The positive twin, on the same recording: unmuted it plays.
+		await setMuted(pg, false);
+		await pg.eval(`document.getElementById("hid-recorder-play").click()`);
+		await server.waitHost(before + 2);
+		const after = server.host.slice(before);
+		await pg.close();
+
+		assert.deepEqual(muted, [], `a muted replay must send nothing: ${JSON.stringify(muted)}`);
+		assert.match(said, /mute/i,
+			`a replay that will do nothing has to say why, got ${JSON.stringify(said)}`);
+		assert.ok(after.includes("key Escape down"),
+			`the same script has to play once unmuted: ${JSON.stringify(after)}`);
+	});
+});
+
 describe("one way to type, and it cannot be bypassed", () => {
 	test("nothing posts to api/hid/print except print.js", async () => {
 		// The rule above is enforced in one place, so a fourth caller cannot
@@ -729,6 +915,23 @@ describe("one way to type, and it cannot be bypassed", () => {
 			// review lens walked straight past this guard with one.
 			assert.doesNotMatch(src, /["'`]api\/hid\/print["'`]/,
 				`${f}: typing text on the host goes through printText(), which puts the board down first`);
+		}
+	});
+
+	test("nothing reads the mute switch except mute.js", () => {
+		// One reader, because "is it muted" is one question and four answers to
+		// it drift. The three copies this replaces were in keyboard.js, reached
+		// by the typing bar; the two modules that needed it most -- paste.js
+		// and recorder.js -- had none. Modules may still ASK mute.js, which is
+		// how a surface words its own refusal; what they may not do is look the
+		// switch up themselves.
+		for (const f of jsFiles()) {
+			if (f.endsWith("kvm/mute.js")) {
+				continue;
+			}
+			const src = read(f).replace(/\/\/[^\n]*/g, "");
+			assert.doesNotMatch(src, /["'`]hid-mute-switch["'`]/,
+				`${f}: the switch is mute.js's to read -- import hidMuted() or hidSilences()`);
 		}
 	});
 
