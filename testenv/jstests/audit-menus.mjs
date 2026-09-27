@@ -13,7 +13,7 @@
 // elements -- so anything that addresses menus by id will silently miss
 // them. Address them as `ul#navbar li div.menu`.
 
-import {serveWeb, launchBrowser} from "/docker_container_volumes/kvmd-mobile-first/testenv/jstests/browser.mjs";
+import {serveWeb, launchBrowser} from "./browser.mjs";
 const srv = await serveWeb(); const br = await launchBrowser();
 const MENUS = ["system", "atx", "msd", "macro", "text", "shortcuts", "gpio", "switch"];
 

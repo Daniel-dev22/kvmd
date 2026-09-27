@@ -2533,7 +2533,10 @@
           </div>
         </div>
         <div class="keypad-type">
-          <input id="hid-type-input" type="text" inputmode="text" enterkeyhint="enter" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tap to type on the host" aria-label="Type on the host">
+          <div class="keypad-type-field">
+            <input id="hid-type-input" type="text" inputmode="text" enterkeyhint="enter" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Tap to type on the host" aria-label="Type on the host">
+            <div id="hid-type-status" role="status" aria-live="polite"></div>
+          </div>
           <button id="hid-type-board" type="button" title="Show the keyboard">&#9000;</button>
           <button id="hid-type-clear" type="button" title="Clear">&times;</button>
         </div>

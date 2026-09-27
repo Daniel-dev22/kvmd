@@ -70,6 +70,11 @@
 	--cs-key-locked-bg: #a80000;
 	--cs-key-locked-fg: white;
 
+	/* Typing that did not reach the host, or may not have. The same red as
+	   the failed border it appears with, which is the only other signal. */
+	--cs-typing-problem-bg: #bb5b5b;
+	--cs-typing-problem-fg: white;
+
 	--cs-corner-bg: #5b90bb;
 
 	--shadow-micro: 1px 2px 4px 0 rgba(0, 0, 0, 0.4);

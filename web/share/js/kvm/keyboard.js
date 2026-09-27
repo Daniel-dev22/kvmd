@@ -24,13 +24,18 @@ import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
 import {UI_MOBILE} from "../ui.js";
-import {printText} from "./print.js";
+import {hidSilences} from "./mute.js";
+import {printText, setKeyboardState} from "./print.js";
 import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
 
 // An interactive keystroke that has not landed in fifteen seconds is not going
 // to, and every key behind it in the queue is waiting on it.
 const TYPING_TIMEOUT_MS = 15000;
+
+// Long enough to READ. The old signal was a 2s border, and a border does not
+// have to be read.
+const PROBLEM_SHOWN_MS = 4000;
 
 
 export function Keyboard(__recordWsEvent, __recordPrintEvent) {
@@ -39,7 +44,11 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	/************************************************************************/
 
 	var __ws = null;
-	var __online = true;
+	// true / false / null are kvmd's three answers -- ready, inactive or busy,
+	// and the whole emulator gone. `undefined` is the fourth state the page has
+	// always been in and never had a name for: NOT TOLD YET. It used to start
+	// as `true`, which is a claim about a HID nothing had spoken to.
+	var __online = undefined;
 
 	var __caps_led = false;
 
@@ -51,6 +60,15 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		// resolves a code to every element carrying it, which is what keeps
 		// modifier state in step between the desktop and compact boards.
 		__keypad = new Keypad($("keyboard-window"), __sendKey);
+		// Anything that types TEXT on the host does it through print.js, which
+		// puts the board down first: a modifier latched on the strip is a key
+		// held down on the HID, and every character the server types under it
+		// arrives as a chord. print.js carries the whole reasoning, and asks
+		// the same two questions of the same keyboard the bar does.
+		setKeyboardState({
+			"dropHeldKeys": self.releaseAll,
+			"notReady": () => (__hidReady() ? null : __whyNotReady()),
+		});
 
 		__initLayers();
 		__initTyping();
@@ -114,6 +132,14 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		if (ws !== __ws) {
 			self.releaseAll();
 			__ws = ws;
+			// Nothing is known about THIS session's HID until it says so, and
+			// the last one's answer is not an answer: kvmd sends the whole
+			// state the moment the socket opens, so this is unknown for about
+			// a round trip. Carrying the old value across a reconnect is how a
+			// gadget that went offline while we were away reads as ready --
+			// and `null` would be the opposite lie, a red LED and an "emulator
+			// offline" on a PiKVM that is perfectly well.
+			__online = undefined;
 		}
 		__updateOnlineLeds();
 	};
@@ -140,8 +166,22 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		}
 	};
 
+	// Everything the page is holding down on the host, let go.
+	//
+	// The magic-shortcut composer is the other thing that holds keys: while it
+	// is armed it deliberately SWALLOWS modifier releases (see __sendKey), so
+	// that letting go of Ctrl on a real keyboard does not let go of it on the
+	// host. Clearing the board alone therefore un-latches the key on screen and
+	// leaves it held on the host -- with `isCodeActive` now false, no later
+	// release can ever emit it either. Its own release path bypasses __sendKey,
+	// so it is the one that has to run.
 	self.releaseAll = function() {
-		__keypad.releaseAll();
+		let released = 0;
+		if (__magic_started || __magic_mods.length > 0) {
+			released += __magic_mods.length;
+			__releaseMagicModifiers();
+		}
+		return (released + __keypad.releaseAll());
 	};
 
 	self.emit = function(code, state) {
@@ -158,7 +198,12 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		let title = "Keyboard free";
 
 		if (__ws) {
-			if (__online === null) {
+			if (__online === undefined) {
+				// Connected, and not told anything yet -- about a round trip.
+				// Either answer painted here would be a guess, and this one is
+				// re-rendered the moment the first state event lands.
+				title = (is_captured ? "Keyboard captured, connecting" : "Keyboard free, connecting");
+			} else if (__online === null) {
 				led = "led-red";
 				title = (is_captured ? "Keyboard captured, emulator offline" : "Keyboard free, emulator offline");
 			} else if (__online) {
@@ -468,6 +513,95 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 	var __exitTyping = null;
 	var __blur_timer = null;
 
+	// Can a keystroke leave at all?
+	//
+	// One direction of it is a FACT: with no socket, or one the engine has
+	// already closed, __innerSendKey sends nothing, so the key is definitely
+	// lost -- and a key lost while the text around it still goes out over HTTP
+	// is not a dropped keystroke but a corrupted line, which is `helo` plus a
+	// correction arriving as `helolo`. Typing stops until the session's own
+	// reconnect loop (session.js, every ~1s) hands back a socket; that path
+	// does not run through here.
+	//
+	// ⚠ The other direction is NOT a fact and cannot be made one from the
+	// browser. A half-open socket -- the far side gone, no FIN, which is what a
+	// phone changing networks produces -- still reads OPEN and still accepts
+	// send() silently. session.js's heartbeat bounds that at 15 missed pings,
+	// so the window is up to ~15s wide, and inside it this answers "up" and the
+	// keys go nowhere. Closing it properly needs an ack per event, which the
+	// protocol does not have.
+	var __linkUp = () => (__ws !== null && __ws.readyState === WebSocket.OPEN);
+
+	// Will the HID do anything with it if it does?
+	//
+	// An INFERENCE, from kvmd's own state stream: `keyboard.online` is false
+	// when the OTG gadget is not enumerated and `busy` is true during a reset,
+	// and in both cases kvmd accepts the report and discards it -- api/hid/print
+	// answers 200 either way, which is the whole reason the bar could claim
+	// success for a keystroke that never happened.
+	//
+	// 🔴 This deliberately does NOT stop the typing. If the inference is wrong
+	// -- a plugin whose `online` means something else, a state stream that has
+	// not caught up -- refusing would leave a user unable to type at all, with
+	// no way round it, to prevent a message being optimistic. Sending under a
+	// wrong inference costs nothing: kvmd discards it exactly as it would have.
+	// So it is REPORTED, not enforced.
+	var __hidReady = () => (__online === true);
+
+	// Why it will not, in the LED's own vocabulary: the page must not tell the
+	// user the emulator is offline while the LED beside it says busy.
+	var __whyNotReady = function() {
+		if (__online === null) {
+			return "Emulator offline"; // The red LED
+		}
+		if (__online === false) {
+			return "Keyboard inactive/busy"; // The yellow one
+		}
+		return "Still connecting"; // Not told yet -- see setSocket()
+	};
+
+	// What happened to the keystrokes, in WORDS.
+	//
+	// A 2s red border was the whole signal before this: colour only, nothing
+	// for a screen reader, and nothing that says which of three things went
+	// wrong. It matters more here than on a desktop -- the queue drops whatever
+	// was behind a failure, the video is the only other evidence, and with the
+	// navbar collapsed into its button the keyboard LED is not even on screen.
+	// `urgent` means something was DROPPED, and always takes the line. A
+	// warning does not: it is true for as long as the state lasts and is asked
+	// on every key event, so letting it re-arm the timer would pin the line up
+	// for the whole burst, and letting it replace a failure would take a status
+	// code off the screen before it could be read.
+	var __sayTyping = function(text, urgent=false) {
+		let el = $("hid-type-input");
+		let el_status = $("hid-type-status");
+		if (el === null || el_status === null) {
+			return; // Desktop pages do not render the typing bar
+		}
+		if (!urgent && __failed_timer !== null) {
+			return;
+		}
+		el.setAttribute("data-failed", "1");
+		el_status.innerText = text;
+		if (__failed_timer !== null) {
+			clearTimeout(__failed_timer);
+		}
+		__failed_timer = setTimeout(function() {
+			__failed_timer = null;
+			el.removeAttribute("data-failed");
+			el_status.innerText = "";
+		}, PROBLEM_SHOWN_MS);
+	};
+
+	// Said when the page can see that the HID will throw the keystroke away.
+	// Fired per burst rather than once per session on purpose: it is the answer
+	// to "did that arrive?", asked at the moment the user asks it.
+	var __warnIfNotReady = function() {
+		if (!__hidReady()) {
+			__sayTyping(`${__whyNotReady()} \u2014 this may not have arrived`);
+		}
+	};
+
 	var __initTyping = function() {
 		let el = $("hid-type-input");
 		if (el === null) {
@@ -481,6 +615,14 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 					done(true, null);
 					return;
 				}
+				if (!__linkUp()) {
+					// HTTP can still be up while the socket is not, and then
+					// the text would land while the Backspace behind it was
+					// dropped. A null `info` says the page refused, not kvmd.
+					done(false, null);
+					return;
+				}
+				__warnIfNotReady();
 				printText(text, keymap, 0, function(http) {
 					if (http.status === 200) {
 						// The Text menu records its prints; a recording made through
@@ -489,19 +631,22 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 						__recordPrintEvent(text, keymap, 0);
 					}
 					done(http.status === 200, http);
-				}, TYPING_TIMEOUT_MS);
+				}, {"timeout": TYPING_TIMEOUT_MS});
 			},
 			"sendKey": function(code, state) {
-				// Reports DELIVERABILITY, not whether anything was sent: a muted
-				// HID is a deliberate silence, an unreachable one is a failure.
-				//
-				// ⚠ It cannot yet tell the difference, so it always claims success.
-				// Answering it properly means reading __online -- which covers the
-				// bigger hole that api/hid/print returns 200 whether or not kvmd
-				// could deliver anything -- AND an instrument that can put a page
-				// with no kvmd behind it back "online", or the refusal ships with
-				// no test that can ever make it fire. Both are Phase 8; the queue's
-				// side of it is implemented and covered.
+				// Reports DELIVERABILITY, not whether anything was sent: a
+				// muted HID is a deliberate silence, an unreachable one is a
+				// failure, and the queue needs to tell them apart to decide
+				// whether the text behind this key may still go out.
+				if (!__linkUp()) {
+					return false;
+				}
+				__warnIfNotReady();
+				// The board goes down for a key exactly as it does for text:
+				// Backspace under a latched Ctrl is delete-word in a shell, and
+				// Enter under it is not Enter. This is the other transport --
+				// print.js cannot reach it.
+				self.releaseAll();
 				__sendKey(code, state);
 				return true;
 			},
@@ -515,22 +660,18 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				if (why === null) {
 					return; // A deliberate drop, not a failure
 				}
-				if (why.what === "print") {
+				// A status only exists when kvmd answered. A key whose socket
+				// was gone, and a print the page refused for the same reason,
+				// both arrive here without one -- and both mean the link.
+				let status = ((why.what === "print" && why.http !== null) ? why.http.status : 0);
+				if (status > 0) {
 					// The body can hold what the user typed, so it is not logged.
-					tools.error("Keyboard: typing failed with HTTP", why.http.status);
+					tools.error("Keyboard: typing failed with HTTP", status);
+					__sayTyping(`Not sent \u2014 PiKVM error ${status}`, true);
 				} else {
 					tools.error("Keyboard: typing failed: the HID connection is down");
+					__sayTyping("Not sent \u2014 no connection to PiKVM", true);
 				}
-				// Anything still queued has been dropped, and on a phone the video
-				// is the only other evidence -- so say so where the user is looking.
-				el.setAttribute("data-failed", "1");
-				if (__failed_timer !== null) {
-					clearTimeout(__failed_timer);
-				}
-				__failed_timer = setTimeout(function() {
-					__failed_timer = null;
-					el.removeAttribute("data-failed");
-				}, 2000);
 			},
 		});
 
@@ -759,7 +900,7 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 				"finish": (allow_finish && $("hid-keyboard-bad-link-switch").checked),
 			},
 		};
-		if (__ws && !$("hid-mute-switch").checked) {
+		if (__ws && !hidSilences(ev)) {
 			__ws.sendHidEvent(ev);
 		}
 		delete ev.event.finish;

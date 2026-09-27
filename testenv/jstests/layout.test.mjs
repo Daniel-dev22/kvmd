@@ -5,7 +5,7 @@
 
 import test, {before, after, describe} from "node:test";
 import assert from "node:assert/strict";
-import {serveWeb, launchBrowser, chromiumPath} from "./browser.mjs";
+import {serveWeb, launchBrowser, chromiumPath, waitOnline} from "./browser.mjs";
 import {PAGES, read} from "./helpers.mjs";
 
 // Narrowest supported phone, a common Android, a common iPhone, and a tablet
@@ -35,7 +35,10 @@ test("a browser is available to measure layout", () => {
 
 const urlFor = (page) => `${server.origin}/${page.replace(/^web\//, "")}`;
 
-async function open(page, width, height = 844, mobile = true, touch = false) {
+async function open(page, width, height = 844, mobile = true, touch = false, session = false) {
+	// Assigned either way, never left over from the last test: the typing
+	// tests below need an appliance behind the page and nothing else does.
+	server.control.session = session;
 	const pg = await browser.newPage();
 	await pg.setViewport(width, height, mobile);
 	// Touch has to be on BEFORE navigating, and it changes what the layout
@@ -162,8 +165,11 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 	// got past a green suite.
 	const SHOW = `document.getElementById("mouse-window-keyboard-button").click();`;
 
-	async function openKeyboard(width = 390) {
-		const pg = await open("web/kvm/index.html", width);
+	async function openKeyboard(width = 390, {session = false} = {}) {
+		const pg = await open("web/kvm/index.html", width, 844, true, false, session);
+		if (session) {
+			await waitOnline(pg);
+		}
 		assert.equal(await pg.eval("document.documentElement.dataset.ui"), "mobile",
 			"precondition: the compact board only exists in the compact layout");
 		await pg.eval(SHOW);
@@ -577,9 +583,10 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 
 	test("typing in the bar reaches api/hid/print, once per burst", async () => {
 		// The whole chain, in a real engine: input event -> diff -> queue ->
-		// printText -> tools.httpPost -> XHR. Recorded by standing in for XHR,
-		// because there is no kvmd behind this page.
-		const pg = await openKeyboard();
+		// printText -> tools.httpPost -> XHR, recorded by standing in for XHR.
+		// The appliance stub is on: the bar refuses to type at all when the
+		// page can see that nothing can carry the keystroke.
+		const pg = await openKeyboard(390, {"session": true});
 		const sent = await pg.eval(`(() => {
 			window.__sent = [];
 			const Real = window.XMLHttpRequest;
@@ -607,7 +614,10 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 	});
 
 	test("erasing does not retype the line", async () => {
-		const pg = await openKeyboard();
+		const pg = await openKeyboard(390, {"session": true});
+		// The host record is per SERVER, not per page, and open() in this file
+		// deliberately does not reset it -- so measure the tail this test adds.
+		const before = server.host.length;
 		const sent = await pg.eval(`(() => {
 			window.__sent = [];
 			const Real = window.XMLHttpRequest;
@@ -624,9 +634,15 @@ describe("the on-screen keyboard", {"skip": chromiumPath() ? false : "no chromiu
 			el.dispatchEvent(new Event("input", {bubbles: true}));
 			return window.__sent;
 		})()`);
+		const host = (await server.waitHost(before + 3)).slice(before);
 		await pg.close();
 		// A deletion is a Backspace key event, never a re-print of the text.
 		assert.deepEqual(sent, ["hello"], `erasing sent: ${JSON.stringify(sent)}`);
+		// ...and it is the half this test could not see until the appliance
+		// stub existed: with only the XHR spy, a build that dropped the
+		// Backspace entirely passed.
+		assert.deepEqual(host, ["print \"hello\"", "key Backspace down", "key Backspace up"],
+			`the host did not receive the correction: ${JSON.stringify(host)}`);
 	});
 
 	// Focus events are the whole mechanism here, and a headless page that is not

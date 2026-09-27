@@ -12,6 +12,11 @@ export const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 export const read = (rel) => readFileSync(path.join(ROOT, rel), "utf-8");
 
+// 🔴 Throws on an empty result rather than returning one. Four source scans
+// are written `for (const f of jsFiles()) { assert… }` with no assertion that
+// the list has anything in it, so a walk that finds nothing -- a moved tree, a
+// renamed directory -- turns all four green in under a millisecond. 📏 Measured
+// by a review lens: `jsFiles = () => []` survived the whole suite.
 export function walk(rel, ext) {
 	const base = path.join(ROOT, rel);
 	const out = [];
@@ -26,6 +31,9 @@ export function walk(rel, ext) {
 		}
 	};
 	rec(base);
+	if (out.length === 0) {
+		throw new Error(`no ${ext} files under ${rel}: every scan over this list would pass vacuously`);
+	}
 	return out.sort();
 }
 

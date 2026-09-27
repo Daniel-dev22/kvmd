@@ -93,8 +93,7 @@ test("a delete inside a composed word is one Backspace", () => {
 
 test("a word-delete deletes what it can account for, and never sends a chord", () => {
 	// Ctrl+Backspace means "delete word" in a GUI field and one character in a
-	// shell, so it is a guess about an application we cannot see -- and it
-	// would release a modifier the user had latched on the strip.
+	// shell, so it is a guess about an application we cannot see.
 	assert.deepEqual(
 		decodeEdit({"was": PAD + "hello", "now": PAD, "input_type": "deleteWordBackward"}),
 		[{"key": "Backspace", "n": 5}]);

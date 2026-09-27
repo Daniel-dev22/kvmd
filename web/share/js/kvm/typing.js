@@ -138,9 +138,10 @@ export function decodeEdit({was, now, input_type = null}) {
 			// A word- or line-delete is also never sent as a chord.
 			// Ctrl+Backspace means "delete word" in a GUI field and one character
 			// in a shell, so the chord is a guess about an application we cannot
-			// see; and pressing Ctrl here would release a modifier the user had
-			// latched on the strip. Under-deleting is undone by deleting again.
-			// Over-deleting is not.
+			// see. Under-deleting is undone by deleting again. Over-deleting is
+			// not. (A modifier the user latched on the strip is let go before
+			// anything the bar sends -- see print.js -- so it cannot supply the
+			// Ctrl either.)
 			back = 1;
 		}
 		if (back > 0) {
