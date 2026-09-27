@@ -56,7 +56,10 @@ li.right#system-dropdown
 			tr
 				td Mute KB/M:
 				td #[+menu_switch("hid-mute-switch", true, false)]
-				td.tip Don't send keyboard &amp mouse events
+				//- Says what it does, including the one thing it deliberately
+				//- still sends -- see mute.js. "Nothing is left held down"
+				//- is the whole reason a release is exempt.
+				td.tip Don't send keystrokes or clicks. Releases still go out, so nothing is left held down on the host
 			tr.feature-disabled#hid-jiggler
 				td #[a(target="_blank" href="https://docs.pikvm.org/mouse_jiggler") Mouse jiggler]:
 				td #[+menu_switch("hid-jiggler-switch", false, false)]

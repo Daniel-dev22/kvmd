@@ -9,7 +9,19 @@ li.right#text-dropdown
 			sub Please note that PiKVM cannot switch the keyboard layout
 		hr
 		.text(style="margin-right: 20px")
-			textarea#hid-pak-text(data-wm-menu-focus placeholder="Enter your text here")
+			//- The same four the typing bar carries, and for the same reason:
+			//- "Hide input text" masks this box on screen, and a spellchecker
+			//- still draws its squiggles to word WIDTH under the discs -- and a
+			//- browser with remote spell-check turned on sends what is in here
+			//- to its vendor. This is where people paste passwords.
+			textarea#hid-pak-text(
+				data-wm-menu-focus
+				placeholder="Enter your text here"
+				autocomplete="off"
+				autocorrect="off"
+				autocapitalize="off"
+				spellcheck="false"
+			)
 		table.kv
 			tr
 				td #[button#hid-pak-button(disabled data-wm-menu-force-hide title="Ctrl+Enter when the text is focused") &bull; Paste]

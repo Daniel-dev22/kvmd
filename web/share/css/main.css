@@ -238,6 +238,57 @@ textarea::-webkit-input-placeholder {
 	text-align: center;
 }
 
+/* "Hide input text" (Text menu) -- every field that types on the host, not
+   only the one the switch sits beside. The Text panel's box and the compact
+   layout's typing bar are two doors into the same api/hid/print, and on a
+   phone the bar is the one a password manager fills; masking one of them is a
+   promise kept on the surface nobody uses for it. paste.js owns the switch and
+   sets the attribute; the list of what it covers is this rule, so a third
+   field is one selector rather than a third copy of the binding.
+
+   Two mechanisms because the two fields hold different things. The textarea
+   holds exactly what was typed, so a disc per character is honest. The bar's
+   input is a PIPE: what it holds is eight zero-width padding characters
+   (typing.js, PAD) plus at most the word an IME has not committed yet --
+   everything else has already reached the host. 📏 Measured in this chromium:
+   -webkit-text-security renders a disc for U+200B like any other character, so
+   the bar would have shown EIGHT DOTS standing for nothing, in a field where
+   Backspace cannot remove them. Transparent text hides the composing word and
+   shows nothing where there is nothing. The caret is kept -- it is the only
+   thing left that says the field has focus. */
+:root[data-hid-secure] textarea#hid-pak-text {
+	-webkit-text-security: disc;
+}
+:root[data-hid-secure] input#hid-type-input:focus,
+:root[data-hid-secure] input#hid-type-input:not(:placeholder-shown) {
+	/* 📏 Transparent text alone was not enough, and only a SCREENSHOT said so:
+	   an IME draws its own marker under what it is composing -- a filled block
+	   in this chromium, an underline on Android -- and the marker is the width
+	   of the word, so the length of the password was on screen in a field that
+	   looked broken. Indenting the content out of the box takes the marker and
+	   the caret with it. Both declarations are kept: if an engine ignores one,
+	   the other still hides the characters, and neither is a fallback for the
+	   other's absence -- they hide different things.
+
+	   Scoped to a field that HAS something in it, which is the state the mask is
+	   for: an indented empty field would push its own placeholder off screen
+	   too, leaving a box with no hint in it for as long as the switch is on.
+	   Two selectors for one condition, because neither is sufficient alone --
+	   `:focus` covers the ordinary case (blur empties the field, keyboard.js's
+	   __clearField), and `:not(:placeholder-shown)` covers a field that lost
+	   focus WITHOUT a blur event while an IME still held an uncommitted word in
+	   it: the layout switching to desktop under it, or a tab frozen mid-word
+	   and restored. The padding alone is enough to suppress the placeholder, so
+	   anything the field holds -- content or padding -- masks.
+
+	   Nothing is echoed, not even a disc per character. That is the point: the
+	   field's contents have already reached the host, so an echo of them is a
+	   transcript the bar does not keep, and the console's own video is where
+	   the host says what it got. The focus border says the field is live. */
+	color: transparent;
+	text-indent: -9999px;
+}
+
 div.buttons-row {
 	display: flex;
 	margin: 0;

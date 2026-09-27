@@ -26,6 +26,7 @@
 import {tools, $, $$$} from "../tools.js";
 import {wm} from "../wm.js";
 
+import {hidMuted} from "./mute.js";
 import {Keyboard} from "./keyboard.js";
 import {Mouse} from "./mouse.js";
 
@@ -57,12 +58,27 @@ export function Hid(__getGeometry, __recorder) {
 
 		for (let el_shortcut of $$$("[data-keyboard-shortcut]")) {
 			tools.el.setOnClick(el_shortcut, function() {
+				let codes = el_shortcut.getAttribute("data-keyboard-shortcut").split(" ");
+				if (hidMuted()) {
+					// Every one of these is a chord of key CODES, which is
+					// exactly what the switch silences -- so muted, this menu
+					// flashes its keys, puts three all-zero reports on the wire
+					// and does nothing, with no explanation. The same treatment
+					// the Text panel and the recorder got: one dialog, and not
+					// a confirmation for something that cannot happen. This
+					// decides only what is SAID; the transport refuses whether
+					// or not this branch is here.
+					wm.info(
+						"The hotkey was not sent: <b>Mute KB/M</b> is on, so the page is not"
+						+ " sending keyboard or mouse events.",
+					);
+					return;
+				}
 				let ask = false;
 				let confirm_id = el_shortcut.getAttribute("data-keyboard-shortcut-confirm");
 				if (confirm_id) {
 					ask = $(confirm_id).checked;
 				}
-				let codes = el_shortcut.getAttribute("data-keyboard-shortcut").split(" ");
 				if (ask) {
 					wm.confirm("Do you want to press this hotkey?", codes.join(" + ")).then(function(ok) {
 						if (ok) {

@@ -284,7 +284,7 @@
                         <label for="hid-mute-switch"><span class="switch-inner"></span><span class="switch"></span></label>
                       </div>
                 </td>
-                <td class="tip">Don't send keyboard &amp mouse events</td>
+                <td class="tip">Don't send keystrokes or clicks. Releases still go out, so nothing is left held down on the host</td>
               </tr>
               <tr class="feature-disabled" id="hid-jiggler">
                 <td><a target="_blank" href="https://docs.pikvm.org/mouse_jiggler">Mouse jiggler</a>:</td>
@@ -1010,7 +1010,7 @@
             <div class="text"><b>Paste text as keypress sequence<br></b><sub>Please note that PiKVM cannot switch the keyboard layout</sub></div>
             <hr>
             <div class="text" style="margin-right: 20px">
-              <textarea id="hid-pak-text" data-wm-menu-focus placeholder="Enter your text here"></textarea>
+              <textarea id="hid-pak-text" data-wm-menu-focus placeholder="Enter your text here" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
             </div>
             <table class="kv">
               <tr>

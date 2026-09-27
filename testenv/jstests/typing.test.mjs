@@ -428,12 +428,32 @@ test("the typing field cannot trigger iOS focus zoom", () => {
 		"a font under 16px makes iOS zoom the whole page when the field is focused");
 });
 
-test("muting the HID also mutes typing", () => {
-	const kb = read("web/share/js/kvm/keyboard.js");
-	const edit = kb.slice(kb.indexOf("var __onEdit"));
-	assert.match(edit.slice(0, edit.indexOf("};")), /hid-mute-switch/,
-		"Mute KB/M must stop typed text as well as key presses");
-	// ...and Enter, which does not go through __onEdit.
-	const keydown = kb.slice(kb.indexOf(`el.addEventListener("keydown"`), kb.indexOf("tools.el.setOnClick"));
-	assert.match(keydown, /hid-mute-switch/, "a muted HID must not receive Enter either");
+test("muting is applied where the page SENDS, not where it decides to", () => {
+	// This used to assert that __onEdit and the Enter handler each looked the
+	// switch up. They no longer do, on purpose: three modules wrote the socket
+	// and only one of them had remembered, so the rule moved to the two ways
+	// out -- sendHidEvent (session.js) and printText (print.js) -- where a
+	// writer cannot fail to be covered by it.
+	//
+	// What is left to check statically is that they are still the ones doing
+	// it. That muting actually stops each WRITER is measured from the host's
+	// side of the wire in delivery.test.mjs, one test per writer, which is the
+	// only place it can be measured at all.
+	const ws = read("web/share/js/kvm/session.js");
+	const send = ws.slice(ws.indexOf("var __sendHidEvent"));
+	assert.match(send.slice(0, send.indexOf("\n\t};")), /hidSilences\(/,
+		"every HID event leaves through __sendHidEvent, so that is where the switch is read");
+
+	const pr = read("web/share/js/kvm/print.js");
+	const print = pr.slice(pr.indexOf("export function printText"));
+	// An ORDER, not a byte window. This was `{0,900}`, which happened to sit
+	// between the two today with 91 characters of slack -- trimming a comment
+	// would have let a check moved BELOW the release pass a test whose message
+	// says it must be above it.
+	const refuses = print.indexOf("hidMuted()");
+	const releases = print.indexOf("dropHeldKeys");
+	assert.notEqual(refuses, -1, "printText no longer consults the mute switch at all");
+	assert.notEqual(releases, -1, "printText no longer puts the board down");
+	assert.ok(refuses < releases,
+		"printText must refuse BEFORE it touches the board or issues the request");
 });
