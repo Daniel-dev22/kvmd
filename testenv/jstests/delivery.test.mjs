@@ -227,6 +227,36 @@ describe("the bar never claims a keystroke it could not deliver", {"skip": chrom
 			`the text must still go out: a wrong guess about the HID must not disable typing (${JSON.stringify(host)})`);
 	});
 
+	test("the Text panel says it too, where it is already asking", async () => {
+		// Same lie, one menu away: a paste into an unenumerated gadget answers
+		// 200 and looks exactly like one that worked. The confirmation is
+		// already the moment the user decides, so it is said there rather than
+		// in a surface invented for it.
+		const pg = await open();
+		server.setHid({"keyboard": {"online": false}});
+		await pg.eval("new Promise((r) => setTimeout(r, 300))");
+		await pg.eval(`document.getElementById("hid-pak-text").value = "whoami"`);
+		await pg.eval(`document.getElementById("hid-pak-button").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
+		const asked = await pg.eval(`document.querySelector(".modal .modal-content").innerText`);
+		await pg.close();
+		assert.match(asked, /going to paste 6 character/,
+			"precondition: the confirmation is what is on screen");
+		assert.match(asked, /offline/i,
+			`the paste has to say what it knows: ${JSON.stringify(asked)}`);
+	});
+
+	test("and says nothing of the sort when the HID is ready", async () => {
+		const pg = await open();
+		await pg.eval(`document.getElementById("hid-pak-text").value = "whoami"`);
+		await pg.eval(`document.getElementById("hid-pak-button").click()`);
+		await pg.eval("new Promise((r) => setTimeout(r, 200))");
+		const asked = await pg.eval(`document.querySelector(".modal .modal-content").innerText`);
+		await pg.close();
+		assert.match(asked, /going to paste 6 character/);
+		assert.doesNotMatch(asked, /offline/i, `got ${JSON.stringify(asked)}`);
+	});
+
 	test("with everything ready it says nothing at all", async () => {
 		// The negative control for both messages above: a bar that always
 		// complained would pass them and be useless.
@@ -289,7 +319,7 @@ describe("one way to type, and it cannot be bypassed", () => {
 		}
 	});
 
-	test("typing refuses outright when nothing owns the board", {"skip": chromiumPath() ? false : "no chromium"}, async () => {
+	test("typing refuses outright when no keyboard is wired to it", {"skip": chromiumPath() ? false : "no chromium"}, async () => {
 		// Both directions in one, because a strictness fix cannot be falsified
 		// by the code it guards: the page AS SHIPPED prints (something did
 		// register a releaser), and with the registration taken away printText
@@ -300,15 +330,15 @@ describe("one way to type, and it cannot be bypassed", () => {
 			try {
 				m.printText("", null, null, () => {});
 			} catch (ex) {
-				return "the shipped page has no releaser: " + ex.message;
+				return "the shipped page has no keyboard wired to it: " + ex.message;
 			}
-			m.setHeldKeyReleaser(null);
+			m.setKeyboardState(null);
 			try {
 				m.printText("", null, null, () => {});
 			} catch (ex) {
 				return "refused";
 			}
-			return "typed with nobody holding the board";
+			return "typed with no keyboard wired to it";
 		})()`);
 		await pg.close();
 		assert.equal(out, "refused");

@@ -25,7 +25,7 @@
 
 import {tools, $} from "../tools.js";
 import {wm} from "../wm.js";
-import {printText} from "./print.js";
+import {printText, hidReadyToType} from "./print.js";
 
 
 export function Paste(__recorder) {
@@ -101,9 +101,18 @@ export function Paste(__recorder) {
 			};
 
 			if ($("hid-pak-ask-switch").checked) {
+				// api/hid/print answers 200 whether or not kvmd could deliver a
+				// single scancode, so a paste into an unenumerated gadget looks
+				// exactly like one that worked. Said here rather than invented
+				// as a new surface: the confirmation is already the moment the
+				// user is deciding whether to do it.
+				let doubt = (hidReadyToType() ? "" : `
+					<br><br>The keyboard emulator is offline,
+					so this may not arrive.
+				`);
 				wm.confirm(`
 					You're going to paste ${text.length} character${text.length ? "s" : ""}.<br>
-					Are you sure you want to continue?
+					Are you sure you want to continue?${doubt}
 				`).then(function(ok) {
 					if (ok) {
 						paste_as_keys();

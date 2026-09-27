@@ -24,7 +24,7 @@ import {tools, $, $$$} from "../tools.js";
 import {Keypad} from "../keypad.js";
 import {wm} from "../wm.js";
 import {UI_MOBILE} from "../ui.js";
-import {printText, setHeldKeyReleaser} from "./print.js";
+import {printText, setKeyboardState} from "./print.js";
 import {PAD, decodeEdit, makeTypingQueue} from "./typing.js";
 
 
@@ -58,8 +58,12 @@ export function Keyboard(__recordWsEvent, __recordPrintEvent) {
 		// Anything that types TEXT on the host does it through print.js, which
 		// puts the board down first: a modifier latched on the strip is a key
 		// held down on the HID, and every character the server types under it
-		// arrives as a chord. print.js carries the whole reasoning.
-		setHeldKeyReleaser(self.releaseAll);
+		// arrives as a chord. print.js carries the whole reasoning, and asks
+		// the same two questions of the same keyboard the bar does.
+		setKeyboardState({
+			"dropHeldKeys": self.releaseAll,
+			"ready": () => __hidReady(),
+		});
 
 		__initLayers();
 		__initTyping();

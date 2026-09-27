@@ -33,12 +33,32 @@
 import {tools} from "../tools.js";
 
 
-// Set once by the Keyboard, which owns the board and is therefore the only
-// thing that knows what is being held on it.
-let __dropHeldKeys = null;
+// The keyboard, as far as typing text is concerned: what the on-screen board
+// is holding, and whether the HID will do anything with what it is sent.
+//
+// Registered once by the Keyboard, which owns both -- and which cannot be
+// imported from here, because it imports this.
+let __kbd = null;
 
-export function setHeldKeyReleaser(drop) {
-	__dropHeldKeys = drop;
+export function setKeyboardState(kbd) {
+	__kbd = kbd;
+}
+
+function __keyboard() {
+	if (__kbd === null) {
+		// Not a fallback: a page that types with no keyboard wired to it is a
+		// wiring bug, and carrying on would ship the corruption described
+		// below. Every page that can print builds a Keyboard before it can.
+		throw new Error("print: no keyboard is registered -- see setKeyboardState()");
+	}
+	return __kbd;
+}
+
+// Whether a keystroke sent right now would reach the host, as far as the page
+// can tell. Not a precondition for typing -- see the 🔴 note in keyboard.js --
+// but the answer a caller needs to avoid claiming that it arrived.
+export function hidReadyToType() {
+	return __keyboard().ready();
 }
 
 
@@ -79,12 +99,7 @@ export function setHeldKeyReleaser(drop) {
 // which is how a replayed recording asks for the server's own defaults.
 export function printText(text, keymap, delay, on_done, opts={}) {
 	let {timeout = (7 * 24 * 3600), slow = null} = opts;
-	if (__dropHeldKeys === null) {
-		// Not a fallback: a page that prints without a board to put down is a
-		// wiring bug, and carrying on would ship exactly the corruption above.
-		throw new Error("printText(): nobody registered a held-key releaser");
-	}
-	__dropHeldKeys();
+	__keyboard().dropHeldKeys();
 	let params = {"limit": 0};
 	if (keymap !== null) {
 		params["keymap"] = keymap;
