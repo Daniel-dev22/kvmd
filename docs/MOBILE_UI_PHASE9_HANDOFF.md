@@ -2,13 +2,16 @@
 
 **Branch:** `feat/typing-truth` off `master` (fork `Daniel-dev22/kvmd`, `origin`), worktree
 `/docker_container_volumes/kvmd-phase9`.
-**Range:** `0eb2c307` (the Phase 1–8 merge) … `PLACEHOLDER_HEAD`.
-**Status:** PLACEHOLDER_STATUS
+**Range:** `0eb2c307` (the Phase 1–8 merge) … this document's own commit, five commits.
+**Status:** committed, pushed, and merged into `master` with `--no-ff`. **NOT deployed** — the kd
+appliance is still running Phase 8 (`31511d9d`). Deploying is a separate, deliberate step; the
+command is in the Phase 8 handoff.
 **Read first:** `MOBILE_UI_PHASE7_HANDOFF.md` and `MOBILE_UI_PHASE8_HANDOFF.md`, then this.
 
-**PLACEHOLDER_TESTS tests, all passing** — `CHROMIUM=/snap/bin/chromium node --test
---test-timeout=120000 testenv/jstests/*.test.mjs`, ~70 s on a quiet machine (309 tests / ~64 s at
-the start of the phase). **Check `uptime` first** (see Traps).
+**339 tests, all passing** — `CHROMIUM=/snap/bin/chromium node --test --test-concurrency=4
+--test-timeout=120000 testenv/jstests/*.test.mjs`, 92 s on a quiet machine (309 tests / 64 s at the
+start of the phase, at the default concurrency of one process per file). **Check `uptime` first**,
+and pass `--test-concurrency` — see Traps.
 
 ---
 
@@ -51,7 +54,7 @@ Two questions, answered **differently on purpose**:
 
 | | what it is | what happens |
 |---|---|---|
-| `__linkUp()` — is there a socket? | a **fact**: `__innerSendKey` sends nothing without one | typing **refuses** and says so; the session's own reconnect loop clears it |
+| `__linkUp()` — is there a socket? | a **fact in one direction**: without one `__innerSendKey` sends nothing. The converse is not — a half-open socket still reads OPEN, bounded by the heartbeat at ~15 s (deferred row 2) | typing **refuses** and says so; the session's own reconnect loop clears it |
 | `__hidReady()` — will the HID take it? | an **inference** from kvmd's state stream | the text **still goes**, and the page says it may not have arrived |
 
 🔴 The second must not refuse. If the inference is ever wrong — a plugin whose `online` means
@@ -65,9 +68,14 @@ types` red.
 
 The whole failure signal used to be a 2 s red border: colour only, nothing for a screen reader
 (WCAG 1.4.1), and silent about which of three things went wrong. `div#hid-type-status`
-(`role="status"`, `aria-live="polite"`) sits **above** the bar, over the bottom of the video, so it
-covers no control and moves nothing; it is empty except when something is wrong, and it names the
-cause — the link, the emulator, or the status kvmd answered. Closes register row 25.
+(`role="status"`, `aria-live="polite"`) shares a box with the **field** and covers it for four
+seconds: no control is hidden, nothing moves, and the field is the one element whose contents are
+transient by design — everything typed into it has already left. It names the cause, in the LED's
+own words. Closes register row 25.
+
+📏 It went **above** the row first, which is where the comment said there was video. There is not:
+there is the strip, and it covered `Ctrl`, `Esc` and `Tab` and — being an element on top of them —
+took their taps as well. See the review section.
 
 The Text panel's paste has the same blind spot, so its **confirmation** — already the moment the
 user is deciding — says it too. ⚠ With *Ask paste confirmation* turned off there is nothing to say
@@ -121,16 +129,50 @@ suite re-run. All of these went red, and nothing else did:
 | `$("hid-type-status")` resolves to null | 4 |
 | `printText()` returns instead of throwing with no keyboard registered | 1 |
 | a second `api/hid/print` caller added to `recorder.js` | 1 (the guard) |
+| …written with a **backtick** instead of a quote | 1 (after the review; it slipped past the first regex) |
+| `jsFiles()` returns an empty list | 1 (after the review; it used to pass in 0.7 ms over nothing) |
+| `Keypad.releaseAll` releases only the FIRST key | 1 (after the review; needs two LOCKED modifiers to see) |
+| the status line's `display: flex` → `none` | 1 (after the review) |
+| the status line is never cleared | 1 (after the review) |
+| the warning is said once per session instead of per burst | 1 (after the review) |
+| `__warnIfNotReady()` deleted from the key transport | 1 (after the review) |
+| `__warnIfNotReady()` moved into the print's callback | 6 (after the review) |
+| `__online = online` (ignoring `hid.online` and `busy`) | 1 (after the review) |
+| `limit: 0` dropped from the print request | 2 (after the review) |
+
+📏 **The verification lens ran 23 mutations of its own and 14 survived** — against an author sweep
+that killed everything it tried, which is the usual ratio and the reason that lens exists. The
+biggest was the one nobody could have reasoned their way to: **`innerText` falls back to
+`textContent` for an element that is not being rendered**, so every assertion about the new message
+passed against `display: none`. The phase's whole user-visible surface was verified as a string in
+the DOM. Twelve of the fourteen are now dead (the table above); the two that are not are recorded
+below.
+
+**Two survivors are left deliberately.**
+- **`sendKey` returning `true` when the link is down** cannot be killed from a browser: the queue's
+  contract (abort, so the text behind the key does not go out alone) is unit-tested against a stub
+  in `typing.test.mjs`, and in the real code the print path refuses on *the same condition*, so the
+  two guards mask each other. Removing either one is caught; lying in one while the other holds is
+  not.
+- **`waitHost`/`waitOnline` reduced to no-ops** survive on an idle machine, because the CDP round
+  trips supply the latency the tests need. They are load-bearing under contention — 📏 this suite
+  read three delivered events as none at load average 226 — so they stay, unexercised, as the
+  belt-and-braces they are.
 
 **Assumed, NOT measured.**
 - **The stub is not kvmd.** It answers the same shapes (`poll_state` sends the whole state, so it
   does too) but nothing here has talked to a real appliance since Phase 8's deploy.
 - **Nothing here has run on a phone or on WebKit.** iOS is unexercised, as in every phase.
-- **The ordering claim is the stub's ARRIVAL order** across two sockets on loopback. It has never
-  been observed to invert (the release is written synchronously from JS before the XHR is
-  constructed), but two TCP connections are not ordered by anything stronger than that.
+- **The ordering claim is the stub's ARRIVAL order** across two sockets on loopback, and the stub
+  runs both transports in one process — so nothing it records could see the race that matters on a
+  real appliance. What IS pinned is that the request is not issued in the same task as the release
+  (a 10 ms head start, asserted through the module). Two TCP connections are not ordered by anything
+  stronger than that.
 - **The 4 s message has not been read by anyone on a device.** It is long enough to read on a
   desktop; a phone is a different reading distance.
+- **Nothing has spoken to a screen reader.** The line is a rendered `role="status"` region whose
+  text changes while it is in the tree, which is the pattern that is supposed to be announced; that
+  it IS announced is a claim about NVDA, VoiceOver and TalkBack, not about this suite.
 
 ---
 
@@ -157,10 +199,22 @@ refusal prevents (an optimistic message) is smaller and shorter than the harm it
 all, with no override) — and one is recoverable by looking at the video, the other is not recoverable
 at all.
 
-**The status line sits ABOVE the bar.** In the row there is nothing to spare at 390px — an input and
-two 46px buttons — and a line that pushed them down would move the console every time something
-failed. Over the video it covers no control, costs no layout, and is where the user is already
-looking. `:not(:empty)` drives it rather than a second attribute: the text IS the state.
+**The status line covers the FIELD.** The three candidates were: in the row (it would push the
+sheet 25px taller and move the console every time something failed — there is nothing to spare at
+390px beside an input and two 46px buttons); above the row (where it covers three keys of the strip
+and takes their taps — this is what shipped first and what the review killed); and over the field
+itself, whose contents are transient by design, because everything typed into it has already left.
+`:not(:empty)` drives it rather than a second attribute: the text IS the state. It is kept rendered
+even while empty, because a live region that is `display: none` when its text is set is the pattern
+screen readers announce least reliably — only its colours are conditional.
+
+**The release gets a 10 ms head start, paid once per burst.** The release leaves on the websocket
+and the text on a second connection, and nothing orders one against the other. Losing that race
+does not chord one character — kvmd's `send_key_events` only yields between keys when a delay was
+asked for, so with the bar's `delay=0` the whole burst goes into the HID queue at once. The
+alternative considered was asking the SERVER for a per-key delay instead, which would have cost
+10 ms per **character**: fifty seconds on a five-thousand-character paste. The request is simply not
+issued until the frame has had its head start, and only when something was actually released.
 
 **The Text panel says it in the confirmation it already shows**, rather than in a surface invented
 for it. The gap (confirmation switched off ⇒ nothing said) is a register row, not a reason to build
@@ -198,6 +252,13 @@ decision nobody was making yet.
 for this tree — worth knowing, because it is the fastest check available and there is no linter in
 the loop for `web/`.
 
+📏 **A two-key test could not see "release only the first key".** `Keypad.emit()` ends in
+`__unholdAll()`, which releases every HELD key on the board — so releasing the first one released
+the second anyway, and the mutation survived a test written specifically to catch it. It is only
+visible with two **locked** modifiers, which are the ones `__unholdAll` skips by design. The lesson
+generalises: when a canary survives a test written for it, the thing to suspect first is a second
+mechanism doing the same work.
+
 ---
 
 ## The review, and what it found
@@ -206,8 +267,11 @@ Four independent lenses against the frozen SHA `d902450e` (domain correctness, s
 surface, regression, verification quality), each with the same context block and its own brief, plus
 a fifth that is not a lens: **looking at a screenshot**.
 
-**23 findings. 18 fixed, 2 deferred with reasons, 3 were "checked and clean".** The three that
-mattered most:
+They raised **42 findings between them** — 8, 5, 7 and 14 surviving mutations, plus 8 observations
+about tests that prove less than their name. Three more were "checked and clean" and are written up
+as such in the lenses' own words so nobody re-derives them (the recorder's request parameters, the
+moved test helpers, and every page that is not `/kvm`). **Everything raised is either fixed here or
+in the register below.** The three that mattered most:
 
 1. 🔴 **A muted release leaves a key held on the host and clear on screen** — found independently by
    TWO lenses, which is the strongest signal a review produces. The board clears a latch whether or
@@ -290,6 +354,16 @@ correctly — and every assertion about what the host received reads as "nothing
 **`server.host` is the host's side of both transports, in arrival order**; `server.printed` is still
 the HTTP record. Use `server.waitHost(n)` rather than a sleep — and `waitHost(0, ms)` to assert that
 nothing arrived, which has to wait out the whole window.
+
+⚠ **Both records are per SERVER, not per page**, and only `server.reset()` clears them.
+`delivery.test.mjs` resets in `open()`; `layout.test.mjs` deliberately does not, so a test there
+must take `server.host.length` before it acts and slice from it. 📏 A whole-array `deepEqual` passed
+alone and failed in the suite, for exactly this.
+
+🔴 **`innerText` falls back to `textContent` for an element that is NOT BEING RENDERED.** An
+assertion that reads it therefore passes against `display: none` — which is how every message test
+in this phase passed while the line was invisible. If you assert on text a user is supposed to SEE,
+assert the computed style and the box as well.
 
 **A live region that is `display: none` when its text is set is the pattern screen readers announce
 least reliably.** `#hid-type-status` is therefore always rendered in the compact layout; only its
